@@ -148,6 +148,19 @@ export async function sendReactionWhatsApp(
   }
 }
 
+export async function updateGroupPictureWhatsApp(
+  to: string,
+  imageUrl: string,
+  options: { accountId?: string },
+): Promise<void> {
+  const { listener: active } = requireActiveWebListener(options.accountId);
+  const jid = toWhatsappJid(to);
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  await (active as unknown as { updateProfilePicture: (jid: string, img: Buffer) => Promise<void> }).updateProfilePicture(jid, buffer);
+}
+
 export async function sendPollWhatsApp(
   to: string,
   poll: PollInput,

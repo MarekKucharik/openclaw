@@ -1,6 +1,6 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { OpenClawConfig } from "../../config/config.js";
-import { sendReactionWhatsApp } from "../../web/outbound.js";
+import { sendReactionWhatsApp, updateGroupPictureWhatsApp } from "../../web/outbound.js";
 import { createActionGate, jsonResult, readReactionParams, readStringParam } from "./common.js";
 import { resolveAuthorizedWhatsAppOutboundTarget } from "./whatsapp-target-auth.js";
 
@@ -44,6 +44,23 @@ export async function handleWhatsAppAction(
       return jsonResult({ ok: true, added: emoji });
     }
     return jsonResult({ ok: true, removed: true });
+  }
+
+  if (action === "setGroupIcon") {
+    if (!isActionEnabled("setGroupIcon")) {
+      throw new Error("WhatsApp setGroupIcon is disabled.");
+    }
+    const chatJid = readStringParam(params, "chatJid", { required: true });
+    const imageUrl = readStringParam(params, "imageUrl", { required: true });
+    const accountId = readStringParam(params, "accountId");
+    const resolved = resolveAuthorizedWhatsAppOutboundTarget({
+      cfg,
+      chatJid,
+      accountId,
+      actionLabel: "setGroupIcon",
+    });
+    await updateGroupPictureWhatsApp(resolved.to, imageUrl, { accountId: resolved.accountId });
+    return jsonResult({ ok: true, updated: true });
   }
 
   throw new Error(`Unsupported WhatsApp action: ${action}`);
