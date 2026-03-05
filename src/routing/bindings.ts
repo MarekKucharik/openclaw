@@ -1,8 +1,7 @@
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { normalizeChatChannelId } from "../channels/registry.js";
-import { listRouteBindings } from "../config/bindings.js";
 import type { OpenClawConfig } from "../config/config.js";
-import type { AgentRouteBinding } from "../config/types.agents.js";
+import type { AgentBinding } from "../config/types.agents.js";
 import { normalizeAccountId, normalizeAgentId } from "./session-key.js";
 
 function normalizeBindingChannelId(raw?: string | null): string | null {
@@ -14,11 +13,11 @@ function normalizeBindingChannelId(raw?: string | null): string | null {
   return fallback || null;
 }
 
-export function listBindings(cfg: OpenClawConfig): AgentRouteBinding[] {
-  return listRouteBindings(cfg);
+export function listBindings(cfg: OpenClawConfig): AgentBinding[] {
+  return Array.isArray(cfg.bindings) ? cfg.bindings : [];
 }
 
-function resolveNormalizedBindingMatch(binding: AgentRouteBinding): {
+function resolveNormalizedBindingMatch(binding: AgentBinding): {
   agentId: string;
   accountId: string;
   channelId: string;

@@ -4,7 +4,6 @@ import {
   formatRemainingShort,
 } from "../agents/auth-health.js";
 import {
-  type AuthCredentialReasonCode,
   CLAUDE_CLI_PROFILE_ID,
   CODEX_CLI_PROFILE_ID,
   ensureAuthProfileStore,
@@ -204,7 +203,6 @@ type AuthIssue = {
   profileId: string;
   provider: string;
   status: string;
-  reasonCode?: AuthCredentialReasonCode;
   remainingMs?: number;
 };
 
@@ -224,9 +222,6 @@ export function resolveUnusableProfileHint(params: {
 }
 
 function formatAuthIssueHint(issue: AuthIssue): string | null {
-  if (issue.reasonCode === "invalid_expires") {
-    return "Invalid token expires metadata. Set a future Unix ms timestamp or remove expires.";
-  }
   if (issue.provider === "anthropic" && issue.profileId === CLAUDE_CLI_PROFILE_ID) {
     return `Deprecated profile. Use ${formatCliCommand("openclaw models auth setup-token")} or ${formatCliCommand(
       "openclaw configure",
@@ -244,8 +239,7 @@ function formatAuthIssueLine(issue: AuthIssue): string {
   const remaining =
     issue.remainingMs !== undefined ? ` (${formatRemainingShort(issue.remainingMs)})` : "";
   const hint = formatAuthIssueHint(issue);
-  const reason = issue.reasonCode ? ` [${issue.reasonCode}]` : "";
-  return `- ${issue.profileId}: ${issue.status}${reason}${remaining}${hint ? ` — ${hint}` : ""}`;
+  return `- ${issue.profileId}: ${issue.status}${remaining}${hint ? ` — ${hint}` : ""}`;
 }
 
 export async function noteAuthProfileHealth(params: {
@@ -346,7 +340,6 @@ export async function noteAuthProfileHealth(params: {
             profileId: issue.profileId,
             provider: issue.provider,
             status: issue.status,
-            reasonCode: issue.reasonCode,
             remainingMs: issue.remainingMs,
           }),
         )

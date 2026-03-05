@@ -1,4 +1,4 @@
-import { vi, type Mock } from "vitest";
+import { vi } from "vitest";
 
 type SessionsSpawnTestConfig = ReturnType<(typeof import("../config/config.js"))["loadConfig"]>;
 type CreateSessionsSpawnTool =
@@ -16,6 +16,10 @@ type SessionsSpawnGatewayMockOptions = {
   agentWaitResult?: { status: "ok" | "timeout"; startedAt: number; endedAt: number };
 };
 
+// Avoid exporting vitest mock types (TS2742 under pnpm + d.ts emit).
+// oxlint-disable-next-line typescript/no-explicit-any
+type AnyMock = any;
+
 const hoisted = vi.hoisted(() => {
   const callGatewayMock = vi.fn();
   const defaultConfigOverride = {
@@ -28,12 +32,12 @@ const hoisted = vi.hoisted(() => {
   return { callGatewayMock, defaultConfigOverride, state };
 });
 
-export function getCallGatewayMock(): Mock {
+export function getCallGatewayMock(): AnyMock {
   return hoisted.callGatewayMock;
 }
 
 export function getGatewayRequests(): Array<GatewayRequest> {
-  return getCallGatewayMock().mock.calls.map((call: unknown[]) => call[0] as GatewayRequest);
+  return getCallGatewayMock().mock.calls.map((call: [unknown]) => call[0] as GatewayRequest);
 }
 
 export function getGatewayMethods(): Array<string | undefined> {

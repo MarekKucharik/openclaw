@@ -22,49 +22,6 @@ export type SessionOrigin = {
   threadId?: string | number;
 };
 
-export type SessionAcpIdentitySource = "ensure" | "status" | "event";
-
-export type SessionAcpIdentityState = "pending" | "resolved";
-
-export type SessionAcpIdentity = {
-  state: SessionAcpIdentityState;
-  acpxRecordId?: string;
-  acpxSessionId?: string;
-  agentSessionId?: string;
-  source: SessionAcpIdentitySource;
-  lastUpdatedAt: number;
-};
-
-export type SessionAcpMeta = {
-  backend: string;
-  agent: string;
-  runtimeSessionName: string;
-  identity?: SessionAcpIdentity;
-  mode: "persistent" | "oneshot";
-  runtimeOptions?: AcpSessionRuntimeOptions;
-  cwd?: string;
-  state: "idle" | "running" | "error";
-  lastActivityAt: number;
-  lastError?: string;
-};
-
-export type AcpSessionRuntimeOptions = {
-  /**
-   * ACP runtime mode set via session/set_mode (for example: "plan", "normal", "auto").
-   */
-  runtimeMode?: string;
-  /** ACP runtime config option: model id. */
-  model?: string;
-  /** Working directory override for ACP session turns. */
-  cwd?: string;
-  /** ACP runtime config option: permission profile id. */
-  permissionProfile?: string;
-  /** ACP runtime config option: per-turn timeout in seconds. */
-  timeoutSeconds?: number;
-  /** Backend-specific option bag mapped through session/set_config_option. */
-  backendExtras?: Record<string, string>;
-};
-
 export type SessionEntry = {
   /**
    * Last delivered heartbeat payload (used to suppress duplicate heartbeat notifications).
@@ -84,14 +41,6 @@ export type SessionEntry = {
   spawnDepth?: number;
   systemSent?: boolean;
   abortedLastRun?: boolean;
-  /**
-   * Session-level stop cutoff captured when /stop is received.
-   * Messages at/before this boundary are skipped to avoid replaying
-   * queued pre-stop backlog.
-   */
-  abortCutoffMessageSid?: string;
-  /** Epoch ms cutoff paired with abortCutoffMessageSid when available. */
-  abortCutoffTimestamp?: number;
   chatType?: SessionChatType;
   thinkingLevel?: string;
   verboseLevel?: string;
@@ -163,7 +112,6 @@ export type SessionEntry = {
   lastThreadId?: string | number;
   skillsSnapshot?: SessionSkillSnapshot;
   systemPromptReport?: SessionSystemPromptReport;
-  acp?: SessionAcpMeta;
 };
 
 function normalizeRuntimeField(value: string | undefined): string | undefined {
@@ -225,31 +173,12 @@ export function setSessionRuntimeModel(
   return true;
 }
 
-export type SessionEntryMergePolicy = "touch-activity" | "preserve-activity";
-
-type MergeSessionEntryOptions = {
-  policy?: SessionEntryMergePolicy;
-  now?: number;
-};
-
-function resolveMergedUpdatedAt(
+export function mergeSessionEntry(
   existing: SessionEntry | undefined,
   patch: Partial<SessionEntry>,
-  options?: MergeSessionEntryOptions,
-): number {
-  if (options?.policy === "preserve-activity" && existing) {
-    return existing.updatedAt ?? patch.updatedAt ?? options.now ?? Date.now();
-  }
-  return Math.max(existing?.updatedAt ?? 0, patch.updatedAt ?? 0, options?.now ?? Date.now());
-}
-
-export function mergeSessionEntryWithPolicy(
-  existing: SessionEntry | undefined,
-  patch: Partial<SessionEntry>,
-  options?: MergeSessionEntryOptions,
 ): SessionEntry {
   const sessionId = patch.sessionId ?? existing?.sessionId ?? crypto.randomUUID();
-  const updatedAt = resolveMergedUpdatedAt(existing, patch, options);
+  const updatedAt = Math.max(existing?.updatedAt ?? 0, patch.updatedAt ?? 0, Date.now());
   if (!existing) {
     return normalizeSessionRuntimeModelFields({ ...patch, sessionId, updatedAt });
   }
@@ -265,22 +194,6 @@ export function mergeSessionEntryWithPolicy(
     }
   }
   return normalizeSessionRuntimeModelFields(next);
-}
-
-export function mergeSessionEntry(
-  existing: SessionEntry | undefined,
-  patch: Partial<SessionEntry>,
-): SessionEntry {
-  return mergeSessionEntryWithPolicy(existing, patch);
-}
-
-export function mergeSessionEntryPreserveActivity(
-  existing: SessionEntry | undefined,
-  patch: Partial<SessionEntry>,
-): SessionEntry {
-  return mergeSessionEntryWithPolicy(existing, patch, {
-    policy: "preserve-activity",
-  });
 }
 
 export function resolveFreshSessionTotalTokens(
@@ -328,15 +241,6 @@ export type SessionSystemPromptReport = {
   workspaceDir?: string;
   bootstrapMaxChars?: number;
   bootstrapTotalMaxChars?: number;
-  bootstrapTruncation?: {
-    warningMode?: "off" | "once" | "always";
-    warningShown?: boolean;
-    promptWarningSignature?: string;
-    warningSignaturesSeen?: string[];
-    truncatedFiles?: number;
-    nearLimitFiles?: number;
-    totalNearLimit?: boolean;
-  };
   sandbox?: {
     mode?: string;
     sandboxed?: boolean;

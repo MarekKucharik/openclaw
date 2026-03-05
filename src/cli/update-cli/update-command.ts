@@ -10,7 +10,6 @@ import {
   resolveGatewayPort,
   writeConfigFile,
 } from "../../config/config.js";
-import { formatConfigIssueLines } from "../../config/issue-format.js";
 import { resolveGatewayService } from "../../daemon/service.js";
 import {
   channelToNpmTag,
@@ -656,7 +655,7 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
     return;
   }
   if (opts.channel && !configSnapshot.valid) {
-    const issues = formatConfigIssueLines(configSnapshot.issues, "-");
+    const issues = configSnapshot.issues.map((issue) => `- ${issue.path}: ${issue.message}`);
     defaultRuntime.error(["Config is invalid; cannot set update channel.", ...issues].join("\n"));
     defaultRuntime.exit(1);
     return;
@@ -819,15 +818,11 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
 
   let restartScriptPath: string | null = null;
   let refreshGatewayServiceEnv = false;
-  const gatewayPort = resolveGatewayPort(
-    configSnapshot.valid ? configSnapshot.config : undefined,
-    process.env,
-  );
   if (shouldRestart) {
     try {
       const loaded = await resolveGatewayService().isLoaded({ env: process.env });
       if (loaded) {
-        restartScriptPath = await prepareRestartScript(process.env, gatewayPort);
+        restartScriptPath = await prepareRestartScript(process.env);
         refreshGatewayServiceEnv = true;
       }
     } catch {
@@ -908,7 +903,7 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
     result,
     opts,
     refreshServiceEnv: refreshGatewayServiceEnv,
-    gatewayPort,
+    gatewayPort: resolveGatewayPort(configSnapshot.valid ? configSnapshot.config : undefined),
     restartScriptPath,
   });
 

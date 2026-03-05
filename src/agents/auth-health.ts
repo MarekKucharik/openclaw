@@ -1,14 +1,9 @@
 import type { OpenClawConfig } from "../config/config.js";
 import {
-  type AuthCredentialReasonCode,
   type AuthProfileCredential,
   type AuthProfileStore,
   resolveAuthProfileDisplayLabel,
 } from "./auth-profiles.js";
-import {
-  evaluateStoredCredentialEligibility,
-  resolveTokenExpiryState,
-} from "./auth-profiles/credential-state.js";
 
 export type AuthProfileSource = "store";
 
@@ -19,7 +14,6 @@ export type AuthProfileHealth = {
   provider: string;
   type: "oauth" | "token" | "api_key";
   status: AuthProfileHealthStatus;
-  reasonCode?: AuthCredentialReasonCode;
   expiresAt?: number;
   remainingMs?: number;
   source: AuthProfileSource;
@@ -119,26 +113,11 @@ function buildProfileHealth(params: {
   }
 
   if (credential.type === "token") {
-    const eligibility = evaluateStoredCredentialEligibility({
-      credential,
-      now,
-    });
-    if (!eligibility.eligible) {
-      const status: AuthProfileHealthStatus =
-        eligibility.reasonCode === "expired" ? "expired" : "missing";
-      return {
-        profileId,
-        provider: credential.provider,
-        type: "token",
-        status,
-        reasonCode: eligibility.reasonCode,
-        source,
-        label,
-      };
-    }
-    const expiryState = resolveTokenExpiryState(credential.expires, now);
-    const expiresAt = expiryState === "valid" ? credential.expires : undefined;
-    if (!expiresAt) {
+    const expiresAt =
+      typeof credential.expires === "number" && Number.isFinite(credential.expires)
+        ? credential.expires
+        : undefined;
+    if (!expiresAt || expiresAt <= 0) {
       return {
         profileId,
         provider: credential.provider,
@@ -154,7 +133,6 @@ function buildProfileHealth(params: {
       provider: credential.provider,
       type: "token",
       status,
-      reasonCode: status === "expired" ? "expired" : undefined,
       expiresAt,
       remainingMs,
       source,

@@ -14,11 +14,11 @@ export type DiscordClientOpts = {
 };
 
 function resolveToken(params: { explicit?: string; accountId: string; fallbackToken?: string }) {
-  const explicit = normalizeDiscordToken(params.explicit, "channels.discord.token");
+  const explicit = normalizeDiscordToken(params.explicit);
   if (explicit) {
     return explicit;
   }
-  const fallback = normalizeDiscordToken(params.fallbackToken, "channels.discord.token");
+  const fallback = normalizeDiscordToken(params.fallbackToken);
   if (!fallback) {
     throw new Error(
       `Discord bot token missing for account "${params.accountId}" (set discord.accounts.${params.accountId}.token or DISCORD_BOT_TOKEN for default).`,

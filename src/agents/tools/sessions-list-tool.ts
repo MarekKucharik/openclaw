@@ -1,11 +1,7 @@
 import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import { loadConfig } from "../../config/config.js";
-import {
-  resolveSessionFilePath,
-  resolveSessionFilePathOptions,
-  resolveStorePath,
-} from "../../config/sessions.js";
+import { resolveSessionFilePath } from "../../config/sessions.js";
 import { callGateway } from "../../gateway/call.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import type { AnyAgentTool } from "./common.js";
@@ -158,26 +154,15 @@ export function createSessionsListTool(opts?: {
         const sessionFileRaw = (entry as { sessionFile?: unknown }).sessionFile;
         const sessionFile = typeof sessionFileRaw === "string" ? sessionFileRaw : undefined;
         let transcriptPath: string | undefined;
-        if (sessionId) {
+        if (sessionId && storePath) {
           try {
-            const agentId = resolveAgentIdFromSessionKey(key);
-            const trimmedStorePath = storePath?.trim();
-            let effectiveStorePath: string | undefined;
-            if (trimmedStorePath && trimmedStorePath !== "(multiple)") {
-              if (trimmedStorePath.includes("{agentId}") || trimmedStorePath.startsWith("~")) {
-                effectiveStorePath = resolveStorePath(trimmedStorePath, { agentId });
-              } else if (path.isAbsolute(trimmedStorePath)) {
-                effectiveStorePath = trimmedStorePath;
-              }
-            }
-            const filePathOpts = resolveSessionFilePathOptions({
-              agentId,
-              storePath: effectiveStorePath,
-            });
             transcriptPath = resolveSessionFilePath(
               sessionId,
               sessionFile ? { sessionFile } : undefined,
-              filePathOpts,
+              {
+                agentId: resolveAgentIdFromSessionKey(key),
+                sessionsDir: path.dirname(storePath),
+              },
             );
           } catch {
             transcriptPath = undefined;

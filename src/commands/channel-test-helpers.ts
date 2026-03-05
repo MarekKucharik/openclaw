@@ -10,20 +10,6 @@ import type { ChannelChoice } from "./onboard-types.js";
 import { getChannelOnboardingAdapter } from "./onboarding/registry.js";
 import type { ChannelOnboardingAdapter } from "./onboarding/types.js";
 
-type ChannelOnboardingAdapterPatch = Partial<
-  Pick<
-    ChannelOnboardingAdapter,
-    "configure" | "configureInteractive" | "configureWhenConfigured" | "getStatus"
-  >
->;
-
-type PatchedOnboardingAdapterFields = {
-  configure?: ChannelOnboardingAdapter["configure"];
-  configureInteractive?: ChannelOnboardingAdapter["configureInteractive"];
-  configureWhenConfigured?: ChannelOnboardingAdapter["configureWhenConfigured"];
-  getStatus?: ChannelOnboardingAdapter["getStatus"];
-};
-
 export function setDefaultChannelPluginRegistryForTests(): void {
   const channels = [
     { pluginId: "discord", plugin: discordPlugin, source: "test" },
@@ -36,46 +22,23 @@ export function setDefaultChannelPluginRegistryForTests(): void {
   setActivePluginRegistry(createTestRegistry(channels));
 }
 
-export function patchChannelOnboardingAdapter(
+export function patchChannelOnboardingAdapter<K extends keyof ChannelOnboardingAdapter>(
   channel: ChannelChoice,
-  patch: ChannelOnboardingAdapterPatch,
+  patch: Pick<ChannelOnboardingAdapter, K>,
 ): () => void {
   const adapter = getChannelOnboardingAdapter(channel);
   if (!adapter) {
     throw new Error(`missing onboarding adapter for ${channel}`);
   }
-
-  const previous: PatchedOnboardingAdapterFields = {};
-
-  if (Object.prototype.hasOwnProperty.call(patch, "getStatus")) {
-    previous.getStatus = adapter.getStatus;
-    adapter.getStatus = patch.getStatus ?? adapter.getStatus;
+  const keys = Object.keys(patch) as K[];
+  const previous = {} as Pick<ChannelOnboardingAdapter, K>;
+  for (const key of keys) {
+    previous[key] = adapter[key];
+    adapter[key] = patch[key];
   }
-  if (Object.prototype.hasOwnProperty.call(patch, "configure")) {
-    previous.configure = adapter.configure;
-    adapter.configure = patch.configure ?? adapter.configure;
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "configureInteractive")) {
-    previous.configureInteractive = adapter.configureInteractive;
-    adapter.configureInteractive = patch.configureInteractive;
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "configureWhenConfigured")) {
-    previous.configureWhenConfigured = adapter.configureWhenConfigured;
-    adapter.configureWhenConfigured = patch.configureWhenConfigured;
-  }
-
   return () => {
-    if (Object.prototype.hasOwnProperty.call(patch, "getStatus")) {
-      adapter.getStatus = previous.getStatus!;
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, "configure")) {
-      adapter.configure = previous.configure!;
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, "configureInteractive")) {
-      adapter.configureInteractive = previous.configureInteractive;
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, "configureWhenConfigured")) {
-      adapter.configureWhenConfigured = previous.configureWhenConfigured;
+    for (const key of keys) {
+      adapter[key] = previous[key];
     }
   };
 }

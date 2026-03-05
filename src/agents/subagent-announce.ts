@@ -1,5 +1,5 @@
 import { resolveQueueSettings } from "../auto-reply/reply/queue.js";
-import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH } from "../config/agent-limits.js";
 import { loadConfig } from "../config/config.js";
 import {
@@ -27,7 +27,6 @@ import {
   buildAnnounceIdempotencyKey,
   resolveQueueAnnounceId,
 } from "./announce-idempotency.js";
-import { formatAgentInternalEventsForPrompt, type AgentInternalEvent } from "./internal-events.js";
 import {
   isEmbeddedPiRunActive,
   queueEmbeddedPiMessage,
@@ -49,15 +48,6 @@ const FAST_TEST_RETRY_INTERVAL_MS = 8;
 const FAST_TEST_REPLY_CHANGE_WAIT_MS = 20;
 const DEFAULT_SUBAGENT_ANNOUNCE_TIMEOUT_MS = 60_000;
 const MAX_TIMER_SAFE_TIMEOUT_MS = 2_147_000_000;
-let subagentRegistryRuntimePromise: Promise<
-  typeof import("./subagent-registry-runtime.js")
-> | null = null;
-
-function loadSubagentRegistryRuntime() {
-  subagentRegistryRuntimePromise ??= import("./subagent-registry-runtime.js");
-  return subagentRegistryRuntimePromise;
-}
-
 const DIRECT_ANNOUNCE_TRANSIENT_RETRY_DELAYS_MS = FAST_TEST_MODE
   ? ([8, 16, 32] as const)
   : ([5_000, 10_000, 20_000] as const);
@@ -80,17 +70,12 @@ function buildCompletionDeliveryMessage(params: {
   subagentName: string;
   spawnMode?: SpawnSubagentMode;
   outcome?: SubagentRunOutcome;
-  announceType?: SubagentAnnounceType;
 }): string {
   const findingsText = params.findings.trim();
   if (isAnnounceSkip(findingsText)) {
     return "";
   }
   const hasFindings = findingsText.length > 0 && findingsText !== "(no output)";
-  // Cron completions are standalone messages — skip the subagent status header.
-  if (params.announceType === "cron job") {
-    return hasFindings ? findingsText : "";
-  }
   const header = (() => {
     if (params.outcome?.status === "error") {
       return params.spawnMode === "session"
@@ -526,14 +511,7 @@ async function resolveSubagentCompletionOrigin(params: {
       channel: route.binding.conversation.channel,
       accountId: route.binding.conversation.accountId,
       to: `channel:${route.binding.conversation.conversationId}`,
-      // `conversationId` identifies the target conversation (channel/DM/thread),
-      // but it is not always a thread identifier. Passing it as `threadId` breaks
-      // Slack DM/top-level delivery by forcing an invalid thread_ts. Preserve only
-      // explicit requester thread hints for channels that actually use threading.
-      threadId:
-        requesterOrigin?.threadId != null && requesterOrigin.threadId !== ""
-          ? String(requesterOrigin.threadId)
-          : undefined,
+      threadId: route.binding.conversation.conversationId,
     };
     return {
       // Bound target is authoritative; requester hints fill only missing fields.
@@ -618,7 +596,6 @@ async function sendAnnounce(item: AnnounceQueueItem) {
       to: requesterIsSubagent ? undefined : origin?.to,
       threadId: requesterIsSubagent ? undefined : threadId,
       deliver: !requesterIsSubagent,
-      internalEvents: item.internalEvents,
       idempotencyKey,
     },
     timeoutMs: announceTimeoutMs,
@@ -669,10 +646,8 @@ async function maybeQueueSubagentAnnounce(params: {
   requesterSessionKey: string;
   announceId?: string;
   triggerMessage: string;
-  steerMessage: string;
   summaryLine?: string;
   requesterOrigin?: DeliveryContext;
-  internalEvents?: AgentInternalEvent[];
   signal?: AbortSignal;
 }): Promise<"steered" | "queued" | "none"> {
   if (params.signal?.aborted) {
@@ -694,7 +669,7 @@ async function maybeQueueSubagentAnnounce(params: {
 
   const shouldSteer = queueSettings.mode === "steer" || queueSettings.mode === "steer-backlog";
   if (shouldSteer) {
-    const steered = queueEmbeddedPiMessage(sessionId, params.steerMessage);
+    const steered = queueEmbeddedPiMessage(sessionId, params.triggerMessage);
     if (steered) {
       return "steered";
     }
@@ -713,7 +688,6 @@ async function maybeQueueSubagentAnnounce(params: {
         announceId: params.announceId,
         prompt: params.triggerMessage,
         summaryLine: params.summaryLine,
-        internalEvents: params.internalEvents,
         enqueuedAt: Date.now(),
         sessionKey: canonicalKey,
         origin,
@@ -731,14 +705,11 @@ async function sendSubagentAnnounceDirectly(params: {
   targetRequesterSessionKey: string;
   triggerMessage: string;
   completionMessage?: string;
-  internalEvents?: AgentInternalEvent[];
   expectsCompletionMessage: boolean;
   bestEffortDeliver?: boolean;
   completionRouteMode?: "bound" | "fallback" | "hook";
   spawnMode?: SpawnSubagentMode;
-  announceType?: SubagentAnnounceType;
   directIdempotencyKey: string;
-  currentRunId?: string;
   completionDirectOrigin?: DeliveryContext;
   directOrigin?: DeliveryContext;
   requesterIsSubagent: boolean;
@@ -779,33 +750,21 @@ async function sendSubagentAnnounceDirectly(params: {
       const forceBoundSessionDirectDelivery =
         params.spawnMode === "session" &&
         (params.completionRouteMode === "bound" || params.completionRouteMode === "hook");
-      const forceCronDirectDelivery = params.announceType === "cron job";
       let shouldSendCompletionDirectly = true;
-      if (!forceBoundSessionDirectDelivery && !forceCronDirectDelivery) {
-        let pendingDescendantRuns = 0;
+      if (!forceBoundSessionDirectDelivery) {
+        let activeDescendantRuns = 0;
         try {
-          const { countPendingDescendantRuns, countPendingDescendantRunsExcludingRun } =
-            await loadSubagentRegistryRuntime();
-          if (params.currentRunId) {
-            pendingDescendantRuns = Math.max(
-              0,
-              countPendingDescendantRunsExcludingRun(
-                canonicalRequesterSessionKey,
-                params.currentRunId,
-              ),
-            );
-          } else {
-            pendingDescendantRuns = Math.max(
-              0,
-              countPendingDescendantRuns(canonicalRequesterSessionKey),
-            );
-          }
+          const { countActiveDescendantRuns } = await import("./subagent-registry.js");
+          activeDescendantRuns = Math.max(
+            0,
+            countActiveDescendantRuns(canonicalRequesterSessionKey),
+          );
         } catch {
           // Best-effort only; when unavailable keep historical direct-send behavior.
         }
         // Keep non-bound completion announcements coordinated via requester
-        // session routing while sibling or descendant runs are still pending.
-        if (pendingDescendantRuns > 0) {
+        // session routing while sibling/descendant runs are still active.
+        if (activeDescendantRuns > 0) {
           shouldSendCompletionDirectly = false;
         }
       }
@@ -879,7 +838,6 @@ async function sendSubagentAnnounceDirectly(params: {
             message: params.triggerMessage,
             deliver: shouldDeliverExternally,
             bestEffortDeliver: params.bestEffortDeliver,
-            internalEvents: params.internalEvents,
             channel: shouldDeliverExternally ? directChannel : undefined,
             accountId: shouldDeliverExternally ? directOrigin?.accountId : undefined,
             to: shouldDeliverExternally ? directTo : undefined,
@@ -908,9 +866,7 @@ async function deliverSubagentAnnouncement(params: {
   requesterSessionKey: string;
   announceId?: string;
   triggerMessage: string;
-  steerMessage: string;
   completionMessage?: string;
-  internalEvents?: AgentInternalEvent[];
   summaryLine?: string;
   requesterOrigin?: DeliveryContext;
   completionDirectOrigin?: DeliveryContext;
@@ -921,9 +877,7 @@ async function deliverSubagentAnnouncement(params: {
   bestEffortDeliver?: boolean;
   completionRouteMode?: "bound" | "fallback" | "hook";
   spawnMode?: SpawnSubagentMode;
-  announceType?: SubagentAnnounceType;
   directIdempotencyKey: string;
-  currentRunId?: string;
   signal?: AbortSignal;
 }): Promise<SubagentAnnounceDeliveryResult> {
   return await runSubagentAnnounceDispatch({
@@ -934,10 +888,8 @@ async function deliverSubagentAnnouncement(params: {
         requesterSessionKey: params.requesterSessionKey,
         announceId: params.announceId,
         triggerMessage: params.triggerMessage,
-        steerMessage: params.steerMessage,
         summaryLine: params.summaryLine,
         requesterOrigin: params.requesterOrigin,
-        internalEvents: params.internalEvents,
         signal: params.signal,
       }),
     direct: async () =>
@@ -945,13 +897,10 @@ async function deliverSubagentAnnouncement(params: {
         targetRequesterSessionKey: params.targetRequesterSessionKey,
         triggerMessage: params.triggerMessage,
         completionMessage: params.completionMessage,
-        internalEvents: params.internalEvents,
         directIdempotencyKey: params.directIdempotencyKey,
-        currentRunId: params.currentRunId,
         completionDirectOrigin: params.completionDirectOrigin,
         completionRouteMode: params.completionRouteMode,
         spawnMode: params.spawnMode,
-        announceType: params.announceType,
         directOrigin: params.directOrigin,
         requesterIsSubagent: params.requesterIsSubagent,
         expectsCompletionMessage: params.expectsCompletionMessage,
@@ -975,8 +924,6 @@ export function buildSubagentSystemPrompt(params: {
   childSessionKey: string;
   label?: string;
   task?: string;
-  /** Whether ACP-specific routing guidance should be included. Defaults to true. */
-  acpEnabled?: boolean;
   /** Depth of the child being spawned (1 = sub-agent, 2 = sub-sub-agent). */
   childDepth?: number;
   /** Config value: max allowed spawn depth. */
@@ -991,7 +938,6 @@ export function buildSubagentSystemPrompt(params: {
     typeof params.maxSpawnDepth === "number"
       ? params.maxSpawnDepth
       : DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH;
-  const acpEnabled = params.acpEnabled !== false;
   const canSpawn = childDepth < maxSpawnDepth;
   const parentLabel = childDepth >= 2 ? "parent orchestrator" : "main agent";
 
@@ -1037,17 +983,6 @@ export function buildSubagentSystemPrompt(params: {
       "Default workflow: spawn work, continue orchestrating, and wait for auto-announced completions.",
       "Do NOT repeatedly poll `subagents list` in a loop unless you are actively debugging or intervening.",
       "Coordinate their work and synthesize results before reporting back.",
-      ...(acpEnabled
-        ? [
-            'For ACP harness sessions (codex/claudecode/gemini), use `sessions_spawn` with `runtime: "acp"` (set `agentId` unless `acp.defaultAgent` is configured).',
-            '`agents_list` and `subagents` apply to OpenClaw sub-agents (`runtime: "subagent"`); ACP harness ids are controlled by `acp.allowedAgents`.',
-            "Do not ask users to run slash commands or CLI when `sessions_spawn` can do it directly.",
-            "Do not use `exec` (`openclaw ...`, `acpx ...`) to spawn ACP sessions.",
-            'Use `subagents` only for OpenClaw subagents (`runtime: "subagent"`).',
-            "Subagent results auto-announce back to you; ACP sessions continue in their bound thread.",
-            "Avoid polling loops; spawn, orchestrate, and synthesize results.",
-          ]
-        : []),
       "",
     );
   } else if (childDepth >= 2) {
@@ -1098,15 +1033,7 @@ function buildAnnounceReplyInstruction(params: {
   if (params.expectsCompletionMessage) {
     return `A completed ${params.announceType} is ready for user delivery. Convert the result above into your normal assistant voice and send that user-facing update now. Keep this internal context private (don't mention system/log/stats/session details or announce type).`;
   }
-  return `A completed ${params.announceType} is ready for user delivery. Convert the result above into your normal assistant voice and send that user-facing update now. Keep this internal context private (don't mention system/log/stats/session details or announce type), and do not copy the internal event text verbatim. Reply ONLY: ${SILENT_REPLY_TOKEN} if this exact result was already delivered to the user in this same turn.`;
-}
-
-function buildAnnounceSteerMessage(events: AgentInternalEvent[]): string {
-  const rendered = formatAgentInternalEventsForPrompt(events);
-  if (!rendered) {
-    return "A background task finished. Process the completion update now.";
-  }
-  return rendered;
+  return `A completed ${params.announceType} is ready for user delivery. Convert the result above into your normal assistant voice and send that user-facing update now. Keep this internal context private (don't mention system/log/stats/session details or announce type), and do not copy the system message verbatim. Reply ONLY: ${SILENT_REPLY_TOKEN} if this exact result was already delivered to the user in this same turn.`;
 }
 
 export async function runSubagentAnnounceFlow(params: {
@@ -1220,9 +1147,6 @@ export async function runSubagentAnnounceFlow(params: {
     if (isAnnounceSkip(reply)) {
       return true;
     }
-    if (isSilentReplyText(reply, SILENT_REPLY_TOKEN)) {
-      return true;
-    }
 
     if (!outcome) {
       outcome = { status: "unknown" };
@@ -1230,18 +1154,16 @@ export async function runSubagentAnnounceFlow(params: {
 
     let requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey);
 
-    let pendingChildDescendantRuns = 0;
+    let activeChildDescendantRuns = 0;
     try {
-      const { countPendingDescendantRuns } = await loadSubagentRegistryRuntime();
-      pendingChildDescendantRuns = Math.max(0, countPendingDescendantRuns(params.childSessionKey));
+      const { countActiveDescendantRuns } = await import("./subagent-registry.js");
+      activeChildDescendantRuns = Math.max(0, countActiveDescendantRuns(params.childSessionKey));
     } catch {
       // Best-effort only; fall back to direct announce behavior when unavailable.
     }
-    const isCronAnnounce = params.announceType === "cron job";
-    if (pendingChildDescendantRuns > 0 && !isCronAnnounce) {
-      // The finished run still has pending descendant subagents (either active,
-      // or ended but still finishing their own announce and cleanup flow). Defer
-      // announcing this run until descendants fully settle.
+    if (activeChildDescendantRuns > 0) {
+      // The finished run still has active descendant subagents. Defer announcing
+      // this run until descendants settle so we avoid posting in-progress updates.
       shouldDeleteChildSession = false;
       return false;
     }
@@ -1273,8 +1195,6 @@ export async function runSubagentAnnounceFlow(params: {
     const findings = reply || "(no output)";
     let completionMessage = "";
     let triggerMessage = "";
-    let steerMessage = "";
-    let internalEvents: AgentInternalEvent[] = [];
 
     let requesterIsSubagent = requesterDepth >= 1;
     // If the requester subagent has already finished, bubble the announce to its
@@ -1284,7 +1204,7 @@ export async function runSubagentAnnounceFlow(params: {
     // still receive the announce — injecting will start a new agent turn.
     if (requesterIsSubagent) {
       const { isSubagentSessionRunActive, resolveRequesterForChildSession } =
-        await loadSubagentRegistryRuntime();
+        await import("./subagent-registry.js");
       if (!isSubagentSessionRunActive(targetRequesterSessionKey)) {
         // Parent run has ended. Check if parent SESSION still exists.
         // If it does, the parent may be waiting for child results — inject there.
@@ -1317,7 +1237,7 @@ export async function runSubagentAnnounceFlow(params: {
 
     let remainingActiveSubagentRuns = 0;
     try {
-      const { countActiveDescendantRuns } = await loadSubagentRegistryRuntime();
+      const { countActiveDescendantRuns } = await import("./subagent-registry.js");
       remainingActiveSubagentRuns = Math.max(
         0,
         countActiveDescendantRuns(targetRequesterSessionKey),
@@ -1341,25 +1261,16 @@ export async function runSubagentAnnounceFlow(params: {
       subagentName,
       spawnMode: params.spawnMode,
       outcome,
-      announceType,
     });
-    internalEvents = [
-      {
-        type: "task_completion",
-        source: announceType === "cron job" ? "cron" : "subagent",
-        childSessionKey: params.childSessionKey,
-        childSessionId: announceSessionId,
-        announceType,
-        taskLabel,
-        status: outcome.status,
-        statusLabel,
-        result: findings,
-        statsLine,
-        replyInstruction,
-      },
-    ];
-    triggerMessage = buildAnnounceSteerMessage(internalEvents);
-    steerMessage = triggerMessage;
+    const internalSummaryMessage = [
+      `[System Message] [sessionId: ${announceSessionId}] A ${announceType} "${taskLabel}" just ${statusLabel}.`,
+      "",
+      "Result:",
+      findings,
+      "",
+      statsLine,
+    ].join("\n");
+    triggerMessage = [internalSummaryMessage, "", replyInstruction].join("\n");
 
     const announceId = buildAnnounceIdFromChildRun({
       childSessionKey: params.childSessionKey,
@@ -1395,9 +1306,7 @@ export async function runSubagentAnnounceFlow(params: {
       requesterSessionKey: targetRequesterSessionKey,
       announceId,
       triggerMessage,
-      steerMessage,
       completionMessage,
-      internalEvents,
       summaryLine: taskLabel,
       requesterOrigin:
         expectsCompletionMessage && !requesterIsSubagent
@@ -1411,22 +1320,10 @@ export async function runSubagentAnnounceFlow(params: {
       bestEffortDeliver: params.bestEffortDeliver,
       completionRouteMode: completionResolution.routeMode,
       spawnMode: params.spawnMode,
-      announceType,
       directIdempotencyKey,
-      currentRunId: params.childRunId,
       signal: params.signal,
     });
-    // Cron delivery state should only be marked as delivered when we have a
-    // direct path result. Queue/steer means "accepted for later processing",
-    // not a confirmed channel send, and can otherwise produce false positives.
-    if (
-      announceType === "cron job" &&
-      (delivery.path === "queued" || delivery.path === "steered")
-    ) {
-      didAnnounce = false;
-    } else {
-      didAnnounce = delivery.delivered;
-    }
+    didAnnounce = delivery.delivered;
     if (!delivery.delivered && delivery.path === "direct" && delivery.error) {
       defaultRuntime.error?.(
         `Subagent completion direct announce failed for run ${params.childRunId}: ${delivery.error}`,

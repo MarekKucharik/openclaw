@@ -49,76 +49,9 @@ const SCANNABLE_EXTENSIONS = new Set([
 
 const DEFAULT_MAX_SCAN_FILES = 500;
 const DEFAULT_MAX_FILE_BYTES = 1024 * 1024;
-const FILE_SCAN_CACHE_MAX = 5000;
-const DIR_ENTRY_CACHE_MAX = 5000;
-
-type FileScanCacheEntry = {
-  size: number;
-  mtimeMs: number;
-  maxFileBytes: number;
-  scanned: boolean;
-  findings: SkillScanFinding[];
-};
-
-const FILE_SCAN_CACHE = new Map<string, FileScanCacheEntry>();
-type CachedDirEntry = {
-  name: string;
-  kind: "file" | "dir";
-};
-type DirEntryCacheEntry = {
-  mtimeMs: number;
-  entries: CachedDirEntry[];
-};
-const DIR_ENTRY_CACHE = new Map<string, DirEntryCacheEntry>();
 
 export function isScannable(filePath: string): boolean {
   return SCANNABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
-}
-
-function getCachedFileScanResult(params: {
-  filePath: string;
-  size: number;
-  mtimeMs: number;
-  maxFileBytes: number;
-}): FileScanCacheEntry | undefined {
-  const cached = FILE_SCAN_CACHE.get(params.filePath);
-  if (!cached) {
-    return undefined;
-  }
-  if (
-    cached.size !== params.size ||
-    cached.mtimeMs !== params.mtimeMs ||
-    cached.maxFileBytes !== params.maxFileBytes
-  ) {
-    FILE_SCAN_CACHE.delete(params.filePath);
-    return undefined;
-  }
-  return cached;
-}
-
-function setCachedFileScanResult(filePath: string, entry: FileScanCacheEntry): void {
-  if (FILE_SCAN_CACHE.size >= FILE_SCAN_CACHE_MAX) {
-    const oldest = FILE_SCAN_CACHE.keys().next();
-    if (!oldest.done) {
-      FILE_SCAN_CACHE.delete(oldest.value);
-    }
-  }
-  FILE_SCAN_CACHE.set(filePath, entry);
-}
-
-function setCachedDirEntries(dirPath: string, entry: DirEntryCacheEntry): void {
-  if (DIR_ENTRY_CACHE.size >= DIR_ENTRY_CACHE_MAX) {
-    const oldest = DIR_ENTRY_CACHE.keys().next();
-    if (!oldest.done) {
-      DIR_ENTRY_CACHE.delete(oldest.value);
-    }
-  }
-  DIR_ENTRY_CACHE.set(dirPath, entry);
-}
-
-export function clearSkillScanCacheForTest(): void {
-  FILE_SCAN_CACHE.clear();
-  DIR_ENTRY_CACHE.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +263,7 @@ async function walkDirWithLimit(dirPath: string, maxFiles: number): Promise<stri
       break;
     }
 
-    const entries = await readDirEntriesWithCache(currentDir);
+    const entries = await fs.readdir(currentDir, { withFileTypes: true });
     for (const entry of entries) {
       if (files.length >= maxFiles) {
         break;
@@ -341,50 +274,15 @@ async function walkDirWithLimit(dirPath: string, maxFiles: number): Promise<stri
       }
 
       const fullPath = path.join(currentDir, entry.name);
-      if (entry.kind === "dir") {
+      if (entry.isDirectory()) {
         stack.push(fullPath);
-      } else if (entry.kind === "file" && isScannable(entry.name)) {
+      } else if (isScannable(entry.name)) {
         files.push(fullPath);
       }
     }
   }
 
   return files;
-}
-
-async function readDirEntriesWithCache(dirPath: string): Promise<CachedDirEntry[]> {
-  let st: Awaited<ReturnType<typeof fs.stat>> | null = null;
-  try {
-    st = await fs.stat(dirPath);
-  } catch (err) {
-    if (hasErrnoCode(err, "ENOENT")) {
-      return [];
-    }
-    throw err;
-  }
-  if (!st?.isDirectory()) {
-    return [];
-  }
-
-  const cached = DIR_ENTRY_CACHE.get(dirPath);
-  if (cached && cached.mtimeMs === st.mtimeMs) {
-    return cached.entries;
-  }
-
-  const dirents = await fs.readdir(dirPath, { withFileTypes: true });
-  const entries: CachedDirEntry[] = [];
-  for (const entry of dirents) {
-    if (entry.isDirectory()) {
-      entries.push({ name: entry.name, kind: "dir" });
-    } else if (entry.isFile()) {
-      entries.push({ name: entry.name, kind: "file" });
-    }
-  }
-  setCachedDirEntries(dirPath, {
-    mtimeMs: st.mtimeMs,
-    entries,
-  });
-  return entries;
 }
 
 async function resolveForcedFiles(params: {
@@ -456,66 +354,27 @@ async function collectScannableFiles(dirPath: string, opts: Required<SkillScanOp
   return out;
 }
 
-async function scanFileWithCache(params: {
-  filePath: string;
-  maxFileBytes: number;
-}): Promise<{ scanned: boolean; findings: SkillScanFinding[] }> {
-  const { filePath, maxFileBytes } = params;
+async function readScannableSource(filePath: string, maxFileBytes: number): Promise<string | null> {
   let st: Awaited<ReturnType<typeof fs.stat>> | null = null;
   try {
     st = await fs.stat(filePath);
   } catch (err) {
     if (hasErrnoCode(err, "ENOENT")) {
-      return { scanned: false, findings: [] };
+      return null;
     }
     throw err;
   }
-  if (!st?.isFile()) {
-    return { scanned: false, findings: [] };
+  if (!st?.isFile() || st.size > maxFileBytes) {
+    return null;
   }
-  const cached = getCachedFileScanResult({
-    filePath,
-    size: st.size,
-    mtimeMs: st.mtimeMs,
-    maxFileBytes,
-  });
-  if (cached) {
-    return {
-      scanned: cached.scanned,
-      findings: cached.findings,
-    };
-  }
-
-  if (st.size > maxFileBytes) {
-    const skippedEntry: FileScanCacheEntry = {
-      size: st.size,
-      mtimeMs: st.mtimeMs,
-      maxFileBytes,
-      scanned: false,
-      findings: [],
-    };
-    setCachedFileScanResult(filePath, skippedEntry);
-    return { scanned: false, findings: [] };
-  }
-
-  let source: string;
   try {
-    source = await fs.readFile(filePath, "utf-8");
+    return await fs.readFile(filePath, "utf-8");
   } catch (err) {
     if (hasErrnoCode(err, "ENOENT")) {
-      return { scanned: false, findings: [] };
+      return null;
     }
     throw err;
   }
-  const findings = scanSource(source, filePath);
-  setCachedFileScanResult(filePath, {
-    size: st.size,
-    mtimeMs: st.mtimeMs,
-    maxFileBytes,
-    scanned: true,
-    findings,
-  });
-  return { scanned: true, findings };
 }
 
 export async function scanDirectory(
@@ -527,14 +386,12 @@ export async function scanDirectory(
   const allFindings: SkillScanFinding[] = [];
 
   for (const file of files) {
-    const scanResult = await scanFileWithCache({
-      filePath: file,
-      maxFileBytes: scanOptions.maxFileBytes,
-    });
-    if (!scanResult.scanned) {
+    const source = await readScannableSource(file, scanOptions.maxFileBytes);
+    if (source == null) {
       continue;
     }
-    allFindings.push(...scanResult.findings);
+    const findings = scanSource(source, file);
+    allFindings.push(...findings);
   }
 
   return allFindings;
@@ -548,36 +405,22 @@ export async function scanDirectoryWithSummary(
   const files = await collectScannableFiles(dirPath, scanOptions);
   const allFindings: SkillScanFinding[] = [];
   let scannedFiles = 0;
-  let critical = 0;
-  let warn = 0;
-  let info = 0;
 
   for (const file of files) {
-    const scanResult = await scanFileWithCache({
-      filePath: file,
-      maxFileBytes: scanOptions.maxFileBytes,
-    });
-    if (!scanResult.scanned) {
+    const source = await readScannableSource(file, scanOptions.maxFileBytes);
+    if (source == null) {
       continue;
     }
     scannedFiles += 1;
-    for (const finding of scanResult.findings) {
-      allFindings.push(finding);
-      if (finding.severity === "critical") {
-        critical += 1;
-      } else if (finding.severity === "warn") {
-        warn += 1;
-      } else {
-        info += 1;
-      }
-    }
+    const findings = scanSource(source, file);
+    allFindings.push(...findings);
   }
 
   return {
     scannedFiles,
-    critical,
-    warn,
-    info,
+    critical: allFindings.filter((f) => f.severity === "critical").length,
+    warn: allFindings.filter((f) => f.severity === "warn").length,
+    info: allFindings.filter((f) => f.severity === "info").length,
     findings: allFindings,
   };
 }

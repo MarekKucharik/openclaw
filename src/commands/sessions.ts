@@ -7,7 +7,7 @@ import { info } from "../globals.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { isRich, theme } from "../terminal/theme.js";
-import { resolveSessionStoreTargetsOrExit } from "./session-store-targets.js";
+import { resolveSessionStoreTargets } from "./session-store-targets.js";
 import {
   formatSessionAgeCell,
   formatSessionFlagsCell,
@@ -95,16 +95,16 @@ export async function sessionsCommand(
     cfg.agents?.defaults?.contextTokens ??
     lookupContextTokens(displayDefaults.model) ??
     DEFAULT_CONTEXT_TOKENS;
-  const targets = resolveSessionStoreTargetsOrExit({
-    cfg,
-    opts: {
+  let targets: ReturnType<typeof resolveSessionStoreTargets>;
+  try {
+    targets = resolveSessionStoreTargets(cfg, {
       store: opts.store,
       agent: opts.agent,
       allAgents: opts.allAgents,
-    },
-    runtime,
-  });
-  if (!targets) {
+    });
+  } catch (error) {
+    runtime.error(error instanceof Error ? error.message : String(error));
+    runtime.exit(1);
     return;
   }
 

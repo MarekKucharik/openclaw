@@ -12,8 +12,6 @@ function makeBrowserState(): BrowserServerState {
     resolved: {
       enabled: true,
       controlPort: 18791,
-      cdpPortRangeStart: 18800,
-      cdpPortRangeEnd: 18899,
       cdpProtocol: "http",
       cdpHost: "127.0.0.1",
       cdpIsLoopback: true,

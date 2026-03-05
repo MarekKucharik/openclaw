@@ -4,13 +4,12 @@ import { Type } from "@sinclair/typebox";
 import type { ExecAsk, ExecHost, ExecSecurity } from "../infra/exec-approvals.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
 import { isDangerousHostEnvVarName } from "../infra/host-env-security.js";
-import { findPathKey, mergePathPrepend } from "../infra/path-prepend.js";
+import { mergePathPrepend } from "../infra/path-prepend.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
-import { scopedHeartbeatWakeOptions } from "../routing/session-key.js";
 import type { ProcessSession } from "./bash-process-registry.js";
 import type { ExecToolDetails } from "./bash-tools.exec-types.js";
 import type { BashSandboxConfig } from "./bash-tools.shared.js";
-export { applyPathPrepend, findPathKey, normalizePathPrepend } from "../infra/path-prepend.js";
+export { applyPathPrepend, normalizePathPrepend } from "../infra/path-prepend.js";
 import { logWarn } from "../logger.js";
 import type { ManagedRun } from "../process/supervisor/index.js";
 import { getProcessSupervisor } from "../process/supervisor/index.js";
@@ -211,10 +210,9 @@ export function applyShellPath(env: Record<string, string>, shellPath?: string |
   if (entries.length === 0) {
     return;
   }
-  const pathKey = findPathKey(env);
-  const merged = mergePathPrepend(env[pathKey], entries);
+  const merged = mergePathPrepend(env.PATH, entries);
   if (merged) {
-    env[pathKey] = merged;
+    env.PATH = merged;
   }
 }
 
@@ -240,9 +238,7 @@ function maybeNotifyOnExit(session: ProcessSession, status: "completed" | "faile
     ? `Exec ${status} (${session.id.slice(0, 8)}, ${exitLabel}) :: ${output}`
     : `Exec ${status} (${session.id.slice(0, 8)}, ${exitLabel})`;
   enqueueSystemEvent(summary, { sessionKey });
-  requestHeartbeatNow(
-    scopedHeartbeatWakeOptions(sessionKey, { reason: `exec:${session.id}:exit` }),
-  );
+  requestHeartbeatNow({ reason: `exec:${session.id}:exit` });
 }
 
 export function createApprovalSlug(id: string) {
@@ -268,7 +264,7 @@ export function emitExecSystemEvent(
     return;
   }
   enqueueSystemEvent(text, { sessionKey, contextKey: opts.contextKey });
-  requestHeartbeatNow(scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }));
+  requestHeartbeatNow({ reason: "exec-event" });
 }
 
 export async function runExecProcess(opts: {
@@ -295,10 +291,6 @@ export async function runExecProcess(opts: {
   const sessionId = createSessionSlug();
   const execCommand = opts.execCommand ?? opts.command;
   const supervisor = getProcessSupervisor();
-  const shellRuntimeEnv: Record<string, string> = {
-    ...opts.env,
-    OPENCLAW_SHELL: "exec",
-  };
 
   const session: ProcessSession = {
     id: sessionId,
@@ -393,7 +385,7 @@ export async function runExecProcess(opts: {
             containerName: opts.sandbox.containerName,
             command: execCommand,
             workdir: opts.containerWorkdir ?? opts.sandbox.containerWorkdir,
-            env: shellRuntimeEnv,
+            env: opts.env,
             tty: opts.usePty,
           }),
         ],
@@ -408,14 +400,14 @@ export async function runExecProcess(opts: {
         mode: "pty" as const,
         ptyCommand: execCommand,
         childFallbackArgv: childArgv,
-        env: shellRuntimeEnv,
+        env: opts.env,
         stdinMode: "pipe-open" as const,
       };
     }
     return {
       mode: "child" as const,
       argv: childArgv,
-      env: shellRuntimeEnv,
+      env: opts.env,
       stdinMode: "pipe-closed" as const,
     };
   })();
@@ -538,8 +530,8 @@ export async function runExecProcess(opts: {
           : "Command not executable (permission denied)"
         : exit.reason === "overall-timeout"
           ? typeof opts.timeoutSec === "number" && opts.timeoutSec > 0
-            ? `Command timed out after ${opts.timeoutSec} seconds. If this command is expected to take longer, re-run with a higher timeout (e.g., exec timeout=300).`
-            : "Command timed out. If this command is expected to take longer, re-run with a higher timeout (e.g., exec timeout=300)."
+            ? `Command timed out after ${opts.timeoutSec} seconds`
+            : "Command timed out"
           : exit.reason === "no-output-timeout"
             ? "Command timed out waiting for output"
             : exit.exitSignal != null

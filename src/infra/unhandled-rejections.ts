@@ -1,10 +1,5 @@
 import process from "node:process";
-import {
-  collectErrorGraphCandidates,
-  extractErrorCode,
-  formatUncaughtError,
-  readErrorName,
-} from "./errors.js";
+import { extractErrorCode, formatUncaughtError } from "./errors.js";
 
 type UnhandledRejectionHandler = (reason: unknown) => boolean;
 
@@ -54,7 +49,6 @@ const TRANSIENT_NETWORK_MESSAGE_CODE_RE =
 const TRANSIENT_NETWORK_MESSAGE_SNIPPETS = [
   "getaddrinfo",
   "socket hang up",
-  "client network socket disconnected before secure tls connection was established",
   "network error",
   "network is unreachable",
   "temporary failure in name resolution",
@@ -65,6 +59,14 @@ function getErrorCause(err: unknown): unknown {
     return undefined;
   }
   return (err as { cause?: unknown }).cause;
+}
+
+function getErrorName(err: unknown): string {
+  if (!err || typeof err !== "object") {
+    return "";
+  }
+  const name = (err as { name?: unknown }).name;
+  return typeof name === "string" ? name : "";
 }
 
 function extractErrorCodeOrErrno(err: unknown): string | undefined {
@@ -91,6 +93,44 @@ function extractErrorCodeWithCause(err: unknown): string | undefined {
     return direct;
   }
   return extractErrorCode(getErrorCause(err));
+}
+
+function collectErrorCandidates(err: unknown): unknown[] {
+  const queue: unknown[] = [err];
+  const seen = new Set<unknown>();
+  const candidates: unknown[] = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+    candidates.push(current);
+
+    if (!current || typeof current !== "object") {
+      continue;
+    }
+
+    const maybeNested: Array<unknown> = [
+      (current as { cause?: unknown }).cause,
+      (current as { reason?: unknown }).reason,
+      (current as { original?: unknown }).original,
+      (current as { error?: unknown }).error,
+      (current as { data?: unknown }).data,
+    ];
+    const errors = (current as { errors?: unknown }).errors;
+    if (Array.isArray(errors)) {
+      maybeNested.push(...errors);
+    }
+    for (const nested of maybeNested) {
+      if (nested != null && !seen.has(nested)) {
+        queue.push(nested);
+      }
+    }
+  }
+
+  return candidates;
 }
 
 /**
@@ -131,25 +171,13 @@ export function isTransientNetworkError(err: unknown): boolean {
   if (!err) {
     return false;
   }
-  for (const candidate of collectErrorGraphCandidates(err, (current) => {
-    const nested: Array<unknown> = [
-      current.cause,
-      current.reason,
-      current.original,
-      current.error,
-      current.data,
-    ];
-    if (Array.isArray(current.errors)) {
-      nested.push(...current.errors);
-    }
-    return nested;
-  })) {
+  for (const candidate of collectErrorCandidates(err)) {
     const code = extractErrorCodeOrErrno(candidate);
     if (code && TRANSIENT_NETWORK_CODES.has(code)) {
       return true;
     }
 
-    const name = readErrorName(candidate);
+    const name = getErrorName(candidate);
     if (name && TRANSIENT_NETWORK_ERROR_NAMES.has(name)) {
       return true;
     }

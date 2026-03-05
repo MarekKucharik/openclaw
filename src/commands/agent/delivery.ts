@@ -1,3 +1,4 @@
+import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { AGENT_LANE_NESTED } from "../../agents/lanes.js";
 import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import { createOutboundSendDeps, type CliDeps } from "../../cli/outbound-send-deps.js";
@@ -16,7 +17,6 @@ import {
   normalizeOutboundPayloads,
   normalizeOutboundPayloadsForJson,
 } from "../../infra/outbound/payloads.js";
-import type { OutboundSessionContext } from "../../infra/outbound/session-context.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import type { AgentCommandOpts } from "./types.js";
@@ -27,9 +27,9 @@ type RunResult = Awaited<
 
 const NESTED_LOG_PREFIX = "[agent:nested]";
 
-function formatNestedLogPrefix(opts: AgentCommandOpts, sessionKey?: string): string {
+function formatNestedLogPrefix(opts: AgentCommandOpts): string {
   const parts = [NESTED_LOG_PREFIX];
-  const session = sessionKey ?? opts.sessionKey ?? opts.sessionId;
+  const session = opts.sessionKey ?? opts.sessionId;
   if (session) {
     parts.push(`session=${session}`);
   }
@@ -49,13 +49,8 @@ function formatNestedLogPrefix(opts: AgentCommandOpts, sessionKey?: string): str
   return parts.join(" ");
 }
 
-function logNestedOutput(
-  runtime: RuntimeEnv,
-  opts: AgentCommandOpts,
-  output: string,
-  sessionKey?: string,
-) {
-  const prefix = formatNestedLogPrefix(opts, sessionKey);
+function logNestedOutput(runtime: RuntimeEnv, opts: AgentCommandOpts, output: string) {
+  const prefix = formatNestedLogPrefix(opts);
   for (const line of output.split(/\r?\n/)) {
     if (!line) {
       continue;
@@ -69,13 +64,11 @@ export async function deliverAgentCommandResult(params: {
   deps: CliDeps;
   runtime: RuntimeEnv;
   opts: AgentCommandOpts;
-  outboundSession: OutboundSessionContext | undefined;
   sessionEntry: SessionEntry | undefined;
   result: RunResult;
   payloads: RunResult["payloads"];
 }) {
-  const { cfg, deps, runtime, opts, outboundSession, sessionEntry, payloads, result } = params;
-  const effectiveSessionKey = outboundSession?.key ?? opts.sessionKey;
+  const { cfg, deps, runtime, opts, sessionEntry, payloads, result } = params;
   const deliver = opts.deliver === true;
   const bestEffortDeliver = opts.bestEffortDeliver === true;
   const turnSourceChannel = opts.runContext?.messageChannel ?? opts.messageChannel;
@@ -207,7 +200,7 @@ export async function deliverAgentCommandResult(params: {
       return;
     }
     if (opts.lane === AGENT_LANE_NESTED) {
-      logNestedOutput(runtime, opts, output, effectiveSessionKey);
+      logNestedOutput(runtime, opts, output);
       return;
     }
     runtime.log(output);
@@ -219,13 +212,18 @@ export async function deliverAgentCommandResult(params: {
   }
   if (deliver && deliveryChannel && !isInternalMessageChannel(deliveryChannel)) {
     if (deliveryTarget) {
+      const deliveryAgentId =
+        opts.agentId ??
+        (opts.sessionKey
+          ? resolveSessionAgentId({ sessionKey: opts.sessionKey, config: cfg })
+          : undefined);
       await deliverOutboundPayloads({
         cfg,
         channel: deliveryChannel,
         to: deliveryTarget,
         accountId: resolvedAccountId,
         payloads: deliveryPayloads,
-        session: outboundSession,
+        agentId: deliveryAgentId,
         replyToId: resolvedReplyToId ?? null,
         threadId: resolvedThreadTarget ?? null,
         bestEffort: bestEffortDeliver,

@@ -87,14 +87,7 @@ export function createBrowserRouteDispatcher(ctx: BrowserRouteContext) {
         for (const [idx, name] of match.paramNames.entries()) {
           const value = exec[idx + 1];
           if (typeof value === "string") {
-            try {
-              params[name] = decodeURIComponent(value);
-            } catch {
-              return {
-                status: 400,
-                body: { error: `invalid path parameter encoding: ${name}` },
-              };
-            }
+            params[name] = decodeURIComponent(value);
           }
         }
       }

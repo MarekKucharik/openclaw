@@ -22,20 +22,6 @@ function configureTerminalIO(params: {
   (process.stdin as { isPaused?: () => boolean }).isPaused = params.isPaused;
 }
 
-function setupPausedTTYStdin() {
-  const setRawMode = vi.fn();
-  const resume = vi.fn();
-  const isPaused = vi.fn(() => true);
-  configureTerminalIO({
-    stdinIsTTY: true,
-    stdoutIsTTY: false,
-    setRawMode,
-    resume,
-    isPaused,
-  });
-  return { setRawMode, resume };
-}
-
 describe("restoreTerminalState", () => {
   const originalStdinIsTTY = process.stdin.isTTY;
   const originalStdoutIsTTY = process.stdout.isTTY;
@@ -59,7 +45,17 @@ describe("restoreTerminalState", () => {
   });
 
   it("does not resume paused stdin by default", () => {
-    const { setRawMode, resume } = setupPausedTTYStdin();
+    const setRawMode = vi.fn();
+    const resume = vi.fn();
+    const isPaused = vi.fn(() => true);
+
+    configureTerminalIO({
+      stdinIsTTY: true,
+      stdoutIsTTY: false,
+      setRawMode,
+      resume,
+      isPaused,
+    });
 
     restoreTerminalState("test");
 
@@ -68,7 +64,17 @@ describe("restoreTerminalState", () => {
   });
 
   it("resumes paused stdin when resumeStdin is true", () => {
-    const { setRawMode, resume } = setupPausedTTYStdin();
+    const setRawMode = vi.fn();
+    const resume = vi.fn();
+    const isPaused = vi.fn(() => true);
+
+    configureTerminalIO({
+      stdinIsTTY: true,
+      stdoutIsTTY: false,
+      setRawMode,
+      resume,
+      isPaused,
+    });
 
     restoreTerminalState("test", { resumeStdinIfPaused: true });
 

@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ClientToolDefinition } from "../agents/pi-embedded-runner/run/params.js";
 import { createDefaultDeps } from "../cli/deps.js";
-import { agentCommandFromIngress } from "../commands/agent.js";
+import { agentCommand } from "../commands/agent.js";
 import type { ImageContent } from "../commands/agent/types.js";
 import type { GatewayHttpResponsesConfig } from "../config/types.gateway.js";
 import { emitAgentEvent, onAgentEvent } from "../infra/agent-events.js";
@@ -34,7 +34,7 @@ import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import { sendJson, setSseHeaders, writeDone } from "./http-common.js";
 import { handleGatewayPostJsonEndpoint } from "./http-endpoint-helpers.js";
-import { resolveGatewayRequestContext } from "./http-utils.js";
+import { resolveAgentIdForRequest, resolveSessionKey } from "./http-utils.js";
 import {
   CreateResponseBodySchema,
   type CreateResponseBody,
@@ -151,6 +151,14 @@ function applyToolChoice(params: {
 
 export { buildAgentPrompt } from "./openresponses-prompt.js";
 
+function resolveOpenResponsesSessionKey(params: {
+  req: IncomingMessage;
+  agentId: string;
+  user?: string | undefined;
+}): string {
+  return resolveSessionKey({ ...params, prefix: "openresponses" });
+}
+
 function createEmptyUsage(): Usage {
   return { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
 }
@@ -189,19 +197,6 @@ function extractUsageFromResult(result: unknown): Usage {
       | { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number }
       | undefined,
   );
-}
-
-type PendingToolCall = { id: string; name: string; arguments: string };
-
-function resolveStopReasonAndPendingToolCalls(meta: unknown): {
-  stopReason: string | undefined;
-  pendingToolCalls: PendingToolCall[] | undefined;
-} {
-  if (!meta || typeof meta !== "object") {
-    return { stopReason: undefined, pendingToolCalls: undefined };
-  }
-  const record = meta as { stopReason?: string; pendingToolCalls?: PendingToolCall[] };
-  return { stopReason: record.stopReason, pendingToolCalls: record.pendingToolCalls };
 }
 
 function createResponseResource(params: {
@@ -246,10 +241,9 @@ async function runResponsesAgentCommand(params: {
   streamParams: { maxTokens: number } | undefined;
   sessionKey: string;
   runId: string;
-  messageChannel: string;
   deps: ReturnType<typeof createDefaultDeps>;
 }) {
-  return agentCommandFromIngress(
+  return agentCommand(
     {
       message: params.message,
       images: params.images.length > 0 ? params.images : undefined,
@@ -259,10 +253,8 @@ async function runResponsesAgentCommand(params: {
       sessionKey: params.sessionKey,
       runId: params.runId,
       deliver: false,
-      messageChannel: params.messageChannel,
+      messageChannel: "webchat",
       bestEffortDeliver: false,
-      // HTTP API callers are authenticated operator clients for this gateway context.
-      senderIsOwner: true,
     },
     defaultRuntime,
     params.deps,
@@ -420,14 +412,8 @@ export async function handleOpenResponsesHttpRequest(
     });
     return true;
   }
-  const { sessionKey, messageChannel } = resolveGatewayRequestContext({
-    req,
-    model,
-    user,
-    sessionPrefix: "openresponses",
-    defaultMessageChannel: "webchat",
-    useMessageChannelHeader: false,
-  });
+  const agentId = resolveAgentIdForRequest({ req, model });
+  const sessionKey = resolveOpenResponsesSessionKey({ req, agentId, user });
 
   // Build prompt from input
   const prompt = buildAgentPrompt(payload.input);
@@ -473,14 +459,19 @@ export async function handleOpenResponsesHttpRequest(
         streamParams,
         sessionKey,
         runId: responseId,
-        messageChannel,
         deps,
       });
 
       const payloads = (result as { payloads?: Array<{ text?: string }> } | null)?.payloads;
       const usage = extractUsageFromResult(result);
       const meta = (result as { meta?: unknown } | null)?.meta;
-      const { stopReason, pendingToolCalls } = resolveStopReasonAndPendingToolCalls(meta);
+      const stopReason =
+        meta && typeof meta === "object" ? (meta as { stopReason?: string }).stopReason : undefined;
+      const pendingToolCalls =
+        meta && typeof meta === "object"
+          ? (meta as { pendingToolCalls?: Array<{ id: string; name: string; arguments: string }> })
+              .pendingToolCalls
+          : undefined;
 
       // If agent called a client tool, return function_call instead of text
       if (stopReason === "tool_calls" && pendingToolCalls && pendingToolCalls.length > 0) {
@@ -700,7 +691,6 @@ export async function handleOpenResponsesHttpRequest(
         streamParams,
         sessionKey,
         runId: responseId,
-        messageChannel,
         deps,
       });
 
@@ -716,7 +706,18 @@ export async function handleOpenResponsesHttpRequest(
         const resultAny = result as { payloads?: Array<{ text?: string }>; meta?: unknown };
         const payloads = resultAny.payloads;
         const meta = resultAny.meta;
-        const { stopReason, pendingToolCalls } = resolveStopReasonAndPendingToolCalls(meta);
+        const stopReason =
+          meta && typeof meta === "object"
+            ? (meta as { stopReason?: string }).stopReason
+            : undefined;
+        const pendingToolCalls =
+          meta && typeof meta === "object"
+            ? (
+                meta as {
+                  pendingToolCalls?: Array<{ id: string; name: string; arguments: string }>;
+                }
+              ).pendingToolCalls
+            : undefined;
 
         // If agent called a client tool, emit function_call instead of text
         if (stopReason === "tool_calls" && pendingToolCalls && pendingToolCalls.length > 0) {

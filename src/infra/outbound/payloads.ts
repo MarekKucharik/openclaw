@@ -43,10 +43,9 @@ function mergeMediaUrls(...lists: Array<ReadonlyArray<string | undefined> | unde
 export function normalizeReplyPayloadsForDelivery(
   payloads: readonly ReplyPayload[],
 ): ReplyPayload[] {
-  const normalized: ReplyPayload[] = [];
-  for (const payload of payloads) {
+  return payloads.flatMap((payload) => {
     if (shouldSuppressReasoningPayload(payload)) {
-      continue;
+      return [];
     }
     const parsed = parseReplyDirectives(payload.text ?? "");
     const explicitMediaUrls = payload.mediaUrls ?? parsed.mediaUrls;
@@ -68,50 +67,47 @@ export function normalizeReplyPayloadsForDelivery(
       audioAsVoice: Boolean(payload.audioAsVoice || parsed.audioAsVoice),
     };
     if (parsed.isSilent && mergedMedia.length === 0) {
-      continue;
+      return [];
     }
     if (!isRenderablePayload(next)) {
-      continue;
+      return [];
     }
-    normalized.push(next);
-  }
-  return normalized;
+    return [next];
+  });
 }
 
 export function normalizeOutboundPayloads(
   payloads: readonly ReplyPayload[],
 ): NormalizedOutboundPayload[] {
-  const normalizedPayloads: NormalizedOutboundPayload[] = [];
-  for (const payload of normalizeReplyPayloadsForDelivery(payloads)) {
-    const mediaUrls = payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
-    const channelData = payload.channelData;
-    const hasChannelData = Boolean(channelData && Object.keys(channelData).length > 0);
-    const text = payload.text ?? "";
-    if (!text && mediaUrls.length === 0 && !hasChannelData) {
-      continue;
-    }
-    normalizedPayloads.push({
-      text,
-      mediaUrls,
-      ...(hasChannelData ? { channelData } : {}),
-    });
-  }
-  return normalizedPayloads;
+  return normalizeReplyPayloadsForDelivery(payloads)
+    .map((payload) => {
+      const channelData = payload.channelData;
+      const normalized: NormalizedOutboundPayload = {
+        text: payload.text ?? "",
+        mediaUrls: payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []),
+      };
+      if (channelData && Object.keys(channelData).length > 0) {
+        normalized.channelData = channelData;
+      }
+      return normalized;
+    })
+    .filter(
+      (payload) =>
+        payload.text ||
+        payload.mediaUrls.length > 0 ||
+        Boolean(payload.channelData && Object.keys(payload.channelData).length > 0),
+    );
 }
 
 export function normalizeOutboundPayloadsForJson(
   payloads: readonly ReplyPayload[],
 ): OutboundPayloadJson[] {
-  const normalized: OutboundPayloadJson[] = [];
-  for (const payload of normalizeReplyPayloadsForDelivery(payloads)) {
-    normalized.push({
-      text: payload.text ?? "",
-      mediaUrl: payload.mediaUrl ?? null,
-      mediaUrls: payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : undefined),
-      channelData: payload.channelData,
-    });
-  }
-  return normalized;
+  return normalizeReplyPayloadsForDelivery(payloads).map((payload) => ({
+    text: payload.text ?? "",
+    mediaUrl: payload.mediaUrl ?? null,
+    mediaUrls: payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : undefined),
+    channelData: payload.channelData,
+  }));
 }
 
 export function formatOutboundPayloadLog(

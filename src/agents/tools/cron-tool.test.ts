@@ -28,27 +28,6 @@ describe("cron tool", () => {
     return params?.payload?.text ?? "";
   }
 
-  function expectSingleGatewayCallMethod(method: string) {
-    expect(callGatewayMock).toHaveBeenCalledTimes(1);
-    const call = readGatewayCall(0);
-    expect(call.method).toBe(method);
-    return call.params;
-  }
-
-  function buildReminderAgentTurnJob(overrides: Record<string, unknown> = {}): {
-    name: string;
-    schedule: { at: string };
-    payload: { kind: "agentTurn"; message: string };
-    delivery?: { mode: string; to?: string };
-  } {
-    return {
-      name: "reminder",
-      schedule: { at: new Date(123).toISOString() },
-      payload: { kind: "agentTurn", message: "hello" },
-      ...overrides,
-    };
-  }
-
   async function executeAddAndReadDelivery(params: {
     callId: string;
     agentSessionKey: string;
@@ -58,7 +37,9 @@ describe("cron tool", () => {
     await tool.execute(params.callId, {
       action: "add",
       job: {
-        ...buildReminderAgentTurnJob(),
+        name: "reminder",
+        schedule: { at: new Date(123).toISOString() },
+        payload: { kind: "agentTurn", message: "hello" },
         ...(params.delivery !== undefined ? { delivery: params.delivery } : {}),
       },
     });
@@ -133,8 +114,13 @@ describe("cron tool", () => {
     const tool = createCronTool();
     await tool.execute("call1", args);
 
-    const params = expectSingleGatewayCallMethod(`cron.${action}`);
-    expect(params).toEqual(expectedParams);
+    expect(callGatewayMock).toHaveBeenCalledTimes(1);
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      method?: string;
+      params?: unknown;
+    };
+    expect(call.method).toBe(`cron.${action}`);
+    expect(call.params).toEqual(expectedParams);
   });
 
   it("prefers jobId over id when both are provided", async () => {
@@ -145,7 +131,10 @@ describe("cron tool", () => {
       id: "job-legacy",
     });
 
-    expect(readGatewayCall().params).toEqual({ id: "job-primary", mode: "force" });
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      params?: unknown;
+    };
+    expect(call?.params).toEqual({ id: "job-primary", mode: "force" });
   });
 
   it("supports due-only run mode", async () => {
@@ -156,7 +145,10 @@ describe("cron tool", () => {
       runMode: "due",
     });
 
-    expect(readGatewayCall().params).toEqual({ id: "job-due", mode: "due" });
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      params?: unknown;
+    };
+    expect(call?.params).toEqual({ id: "job-due", mode: "due" });
   });
 
   it("normalizes cron.add job payloads", async () => {
@@ -172,8 +164,13 @@ describe("cron tool", () => {
       },
     });
 
-    const params = expectSingleGatewayCallMethod("cron.add");
-    expect(params).toEqual({
+    expect(callGatewayMock).toHaveBeenCalledTimes(1);
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      method?: string;
+      params?: unknown;
+    };
+    expect(call.method).toBe("cron.add");
+    expect(call.params).toEqual({
       name: "wake-up",
       enabled: true,
       deleteAfterRun: true,
@@ -370,12 +367,15 @@ describe("cron tool", () => {
       payload: { kind: "agentTurn", message: "do stuff" },
     });
 
-    const params = expectSingleGatewayCallMethod("cron.add") as
-      | { name?: string; sessionTarget?: string; payload?: { kind?: string } }
-      | undefined;
-    expect(params?.name).toBe("flat-job");
-    expect(params?.sessionTarget).toBe("isolated");
-    expect(params?.payload?.kind).toBe("agentTurn");
+    expect(callGatewayMock).toHaveBeenCalledTimes(1);
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      method?: string;
+      params?: { name?: string; sessionTarget?: string; payload?: { kind?: string } };
+    };
+    expect(call.method).toBe("cron.add");
+    expect(call.params?.name).toBe("flat-job");
+    expect(call.params?.sessionTarget).toBe("isolated");
+    expect(call.params?.payload?.kind).toBe("agentTurn");
   });
 
   it("recovers flat params when job is empty object", async () => {
@@ -391,12 +391,15 @@ describe("cron tool", () => {
       payload: { kind: "systemEvent", text: "wake up" },
     });
 
-    const params = expectSingleGatewayCallMethod("cron.add") as
-      | { name?: string; sessionTarget?: string; payload?: { text?: string } }
-      | undefined;
-    expect(params?.name).toBe("empty-job");
-    expect(params?.sessionTarget).toBe("main");
-    expect(params?.payload?.text).toBe("wake up");
+    expect(callGatewayMock).toHaveBeenCalledTimes(1);
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      method?: string;
+      params?: { name?: string; sessionTarget?: string; payload?: { text?: string } };
+    };
+    expect(call.method).toBe("cron.add");
+    expect(call.params?.name).toBe("empty-job");
+    expect(call.params?.sessionTarget).toBe("main");
+    expect(call.params?.payload?.text).toBe("wake up");
   });
 
   it("recovers flat message shorthand as agentTurn payload", async () => {
@@ -409,13 +412,16 @@ describe("cron tool", () => {
       message: "do stuff",
     });
 
-    const params = expectSingleGatewayCallMethod("cron.add") as
-      | { payload?: { kind?: string; message?: string }; sessionTarget?: string }
-      | undefined;
+    expect(callGatewayMock).toHaveBeenCalledTimes(1);
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      method?: string;
+      params?: { payload?: { kind?: string; message?: string }; sessionTarget?: string };
+    };
+    expect(call.method).toBe("cron.add");
     // normalizeCronJobCreate infers agentTurn from message and isolated from agentTurn
-    expect(params?.payload?.kind).toBe("agentTurn");
-    expect(params?.payload?.message).toBe("do stuff");
-    expect(params?.sessionTarget).toBe("isolated");
+    expect(call.params?.payload?.kind).toBe("agentTurn");
+    expect(call.params?.payload?.message).toBe("do stuff");
+    expect(call.params?.sessionTarget).toBe("isolated");
   });
 
   it("does not recover flat params when no meaningful job field is present", async () => {
@@ -480,7 +486,9 @@ describe("cron tool", () => {
       tool.execute("call-webhook-missing", {
         action: "add",
         job: {
-          ...buildReminderAgentTurnJob(),
+          name: "reminder",
+          schedule: { at: new Date(123).toISOString() },
+          payload: { kind: "agentTurn", message: "hello" },
           delivery: { mode: "webhook" },
         },
       }),
@@ -495,55 +503,13 @@ describe("cron tool", () => {
       tool.execute("call-webhook-invalid", {
         action: "add",
         job: {
-          ...buildReminderAgentTurnJob(),
+          name: "reminder",
+          schedule: { at: new Date(123).toISOString() },
+          payload: { kind: "agentTurn", message: "hello" },
           delivery: { mode: "webhook", to: "ftp://example.invalid/cron-finished" },
         },
       }),
     ).rejects.toThrow('delivery.mode="webhook" requires delivery.to to be a valid http(s) URL');
     expect(callGatewayMock).toHaveBeenCalledTimes(0);
-  });
-
-  it("recovers flat patch params for update action", async () => {
-    callGatewayMock.mockResolvedValueOnce({ ok: true });
-
-    const tool = createCronTool();
-    await tool.execute("call-update-flat", {
-      action: "update",
-      jobId: "job-1",
-      name: "new-name",
-      enabled: false,
-    });
-
-    const params = expectSingleGatewayCallMethod("cron.update") as
-      | { id?: string; patch?: { name?: string; enabled?: boolean } }
-      | undefined;
-    expect(params?.id).toBe("job-1");
-    expect(params?.patch?.name).toBe("new-name");
-    expect(params?.patch?.enabled).toBe(false);
-  });
-
-  it("recovers additional flat patch params for update action", async () => {
-    callGatewayMock.mockResolvedValueOnce({ ok: true });
-
-    const tool = createCronTool();
-    await tool.execute("call-update-flat-extra", {
-      action: "update",
-      id: "job-2",
-      sessionTarget: "main",
-      failureAlert: { after: 3, cooldownMs: 60_000 },
-    });
-
-    const params = expectSingleGatewayCallMethod("cron.update") as
-      | {
-          id?: string;
-          patch?: {
-            sessionTarget?: string;
-            failureAlert?: { after?: number; cooldownMs?: number };
-          };
-        }
-      | undefined;
-    expect(params?.id).toBe("job-2");
-    expect(params?.patch?.sessionTarget).toBe("main");
-    expect(params?.patch?.failureAlert).toEqual({ after: 3, cooldownMs: 60_000 });
   });
 });

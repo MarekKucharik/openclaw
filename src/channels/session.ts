@@ -16,27 +16,7 @@ export type InboundLastRouteUpdate = {
   to: string;
   accountId?: string;
   threadId?: string | number;
-  mainDmOwnerPin?: {
-    ownerRecipient: string;
-    senderRecipient: string;
-    onSkip?: (params: { ownerRecipient: string; senderRecipient: string }) => void;
-  };
 };
-
-function shouldSkipPinnedMainDmRouteUpdate(
-  pin: InboundLastRouteUpdate["mainDmOwnerPin"] | undefined,
-): boolean {
-  if (!pin) {
-    return false;
-  }
-  const owner = pin.ownerRecipient.trim().toLowerCase();
-  const sender = pin.senderRecipient.trim().toLowerCase();
-  if (!owner || !sender || owner === sender) {
-    return false;
-  }
-  pin.onSkip?.({ ownerRecipient: pin.ownerRecipient, senderRecipient: pin.senderRecipient });
-  return true;
-}
 
 export async function recordInboundSession(params: {
   storePath: string;
@@ -59,9 +39,6 @@ export async function recordInboundSession(params: {
 
   const update = params.updateLastRoute;
   if (!update) {
-    return;
-  }
-  if (shouldSkipPinnedMainDmRouteUpdate(update.mainDmOwnerPin)) {
     return;
   }
   const targetSessionKey = normalizeSessionStoreKey(update.sessionKey);

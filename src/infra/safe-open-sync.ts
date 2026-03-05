@@ -7,12 +7,9 @@ export type SafeOpenSyncResult =
   | { ok: true; path: string; fd: number; stat: fs.Stats }
   | { ok: false; reason: SafeOpenSyncFailureReason; error?: unknown };
 
-export type SafeOpenSyncAllowedType = "file" | "directory";
-
-type SafeOpenSyncFs = Pick<
-  typeof fs,
-  "constants" | "lstatSync" | "realpathSync" | "openSync" | "fstatSync" | "closeSync"
->;
+const OPEN_READ_FLAGS =
+  fs.constants.O_RDONLY |
+  (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0);
 
 function isExpectedPathError(error: unknown): boolean {
   const code =
@@ -28,50 +25,32 @@ export function openVerifiedFileSync(params: {
   filePath: string;
   resolvedPath?: string;
   rejectPathSymlink?: boolean;
-  rejectHardlinks?: boolean;
   maxBytes?: number;
-  allowedType?: SafeOpenSyncAllowedType;
-  ioFs?: SafeOpenSyncFs;
 }): SafeOpenSyncResult {
-  const ioFs = params.ioFs ?? fs;
-  const allowedType = params.allowedType ?? "file";
-  const openReadFlags =
-    ioFs.constants.O_RDONLY |
-    (typeof ioFs.constants.O_NOFOLLOW === "number" ? ioFs.constants.O_NOFOLLOW : 0);
   let fd: number | null = null;
   try {
     if (params.rejectPathSymlink) {
-      const candidateStat = ioFs.lstatSync(params.filePath);
+      const candidateStat = fs.lstatSync(params.filePath);
       if (candidateStat.isSymbolicLink()) {
         return { ok: false, reason: "validation" };
       }
     }
 
-    const realPath = params.resolvedPath ?? ioFs.realpathSync(params.filePath);
-    const preOpenStat = ioFs.lstatSync(realPath);
-    if (!isAllowedType(preOpenStat, allowedType)) {
+    const realPath = params.resolvedPath ?? fs.realpathSync(params.filePath);
+    const preOpenStat = fs.lstatSync(realPath);
+    if (!preOpenStat.isFile()) {
       return { ok: false, reason: "validation" };
     }
-    if (params.rejectHardlinks && preOpenStat.isFile() && preOpenStat.nlink > 1) {
-      return { ok: false, reason: "validation" };
-    }
-    if (
-      params.maxBytes !== undefined &&
-      preOpenStat.isFile() &&
-      preOpenStat.size > params.maxBytes
-    ) {
+    if (params.maxBytes !== undefined && preOpenStat.size > params.maxBytes) {
       return { ok: false, reason: "validation" };
     }
 
-    fd = ioFs.openSync(realPath, openReadFlags);
-    const openedStat = ioFs.fstatSync(fd);
-    if (!isAllowedType(openedStat, allowedType)) {
+    fd = fs.openSync(realPath, OPEN_READ_FLAGS);
+    const openedStat = fs.fstatSync(fd);
+    if (!openedStat.isFile()) {
       return { ok: false, reason: "validation" };
     }
-    if (params.rejectHardlinks && openedStat.isFile() && openedStat.nlink > 1) {
-      return { ok: false, reason: "validation" };
-    }
-    if (params.maxBytes !== undefined && openedStat.isFile() && openedStat.size > params.maxBytes) {
+    if (params.maxBytes !== undefined && openedStat.size > params.maxBytes) {
       return { ok: false, reason: "validation" };
     }
     if (!sameFileIdentity(preOpenStat, openedStat)) {
@@ -88,14 +67,7 @@ export function openVerifiedFileSync(params: {
     return { ok: false, reason: "io", error };
   } finally {
     if (fd !== null) {
-      ioFs.closeSync(fd);
+      fs.closeSync(fd);
     }
   }
-}
-
-function isAllowedType(stat: fs.Stats, allowedType: SafeOpenSyncAllowedType): boolean {
-  if (allowedType === "directory") {
-    return stat.isDirectory();
-  }
-  return stat.isFile();
 }

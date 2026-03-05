@@ -327,7 +327,7 @@ async function resolveSlackNames(params: {
   entries: string[];
 }) {
   const account = resolveSlackAccount({ cfg: params.cfg, accountId: params.accountId });
-  const token = account.userToken || account.botToken?.trim();
+  const token = account.config.userToken?.trim() || account.botToken?.trim();
   if (!token) {
     return new Map<string, string>();
   }
@@ -390,7 +390,7 @@ export const handleAllowlistCommand: CommandHandler = async (params, allowTextCo
     const pairingChannels = listPairingChannels();
     const supportsStore = pairingChannels.includes(channelId);
     const storeAllowFrom = supportsStore
-      ? await readChannelAllowFromStore(channelId, process.env, accountId).catch(() => [])
+      ? await readChannelAllowFromStore(channelId).catch(() => [])
       : [];
 
     let dmAllowFrom: string[] = [];

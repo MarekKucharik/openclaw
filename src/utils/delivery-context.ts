@@ -121,23 +121,11 @@ export function mergeDeliveryContext(
   if (!normalizedPrimary && !normalizedFallback) {
     return undefined;
   }
-  const channelsConflict =
-    normalizedPrimary?.channel &&
-    normalizedFallback?.channel &&
-    normalizedPrimary.channel !== normalizedFallback.channel;
   return normalizeDeliveryContext({
     channel: normalizedPrimary?.channel ?? normalizedFallback?.channel,
-    // Keep route fields paired to their channel; avoid crossing fields between
-    // unrelated channels during session context merges.
-    to: channelsConflict
-      ? normalizedPrimary?.to
-      : (normalizedPrimary?.to ?? normalizedFallback?.to),
-    accountId: channelsConflict
-      ? normalizedPrimary?.accountId
-      : (normalizedPrimary?.accountId ?? normalizedFallback?.accountId),
-    threadId: channelsConflict
-      ? normalizedPrimary?.threadId
-      : (normalizedPrimary?.threadId ?? normalizedFallback?.threadId),
+    to: normalizedPrimary?.to ?? normalizedFallback?.to,
+    accountId: normalizedPrimary?.accountId ?? normalizedFallback?.accountId,
+    threadId: normalizedPrimary?.threadId ?? normalizedFallback?.threadId,
   });
 }
 

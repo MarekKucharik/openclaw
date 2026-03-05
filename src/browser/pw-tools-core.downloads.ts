@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "playwright-core";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
-import { writeViaSiblingTempPath } from "./output-atomic.js";
 import { DEFAULT_UPLOAD_DIR, resolveStrictExistingPathsWithinRoot } from "./paths.js";
 import {
   ensurePageState,
@@ -19,11 +18,39 @@ import {
   requireRef,
   toAIFriendlyError,
 } from "./pw-tools-core.shared.js";
-import { sanitizeUntrustedFileName } from "./safe-filename.js";
+
+function sanitizeDownloadFileName(fileName: string): string {
+  const trimmed = String(fileName ?? "").trim();
+  if (!trimmed) {
+    return "download.bin";
+  }
+
+  // `suggestedFilename()` is untrusted (influenced by remote servers). Force a basename so
+  // path separators/traversal can't escape the downloads dir on any platform.
+  let base = path.posix.basename(trimmed);
+  base = path.win32.basename(base);
+  let cleaned = "";
+  for (let i = 0; i < base.length; i++) {
+    const code = base.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) {
+      continue;
+    }
+    cleaned += base[i];
+  }
+  base = cleaned.trim();
+
+  if (!base || base === "." || base === "..") {
+    return "download.bin";
+  }
+  if (base.length > 200) {
+    base = base.slice(0, 200);
+  }
+  return base;
+}
 
 function buildTempDownloadPath(fileName: string): string {
   const id = crypto.randomUUID();
-  const safeName = sanitizeUntrustedFileName(fileName, "download.bin");
+  const safeName = sanitizeDownloadFileName(fileName);
   return path.join(resolvePreferredOpenClawTmpDir(), "downloads", `${id}-${safeName}`);
 }
 
@@ -84,26 +111,13 @@ type DownloadPayload = {
 
 async function saveDownloadPayload(download: DownloadPayload, outPath: string) {
   const suggested = download.suggestedFilename?.() || "download.bin";
-  const requestedPath = outPath?.trim();
-  const resolvedOutPath = path.resolve(requestedPath || buildTempDownloadPath(suggested));
+  const resolvedOutPath = outPath?.trim() || buildTempDownloadPath(suggested);
   await fs.mkdir(path.dirname(resolvedOutPath), { recursive: true });
-
-  if (!requestedPath) {
-    await download.saveAs?.(resolvedOutPath);
-  } else {
-    await writeViaSiblingTempPath({
-      rootDir: path.dirname(resolvedOutPath),
-      targetPath: resolvedOutPath,
-      writeTemp: async (tempPath) => {
-        await download.saveAs?.(tempPath);
-      },
-    });
-  }
-
+  await download.saveAs?.(resolvedOutPath);
   return {
     url: download.url?.() || "",
     suggestedFilename: suggested,
-    path: resolvedOutPath,
+    path: path.resolve(resolvedOutPath),
   };
 }
 

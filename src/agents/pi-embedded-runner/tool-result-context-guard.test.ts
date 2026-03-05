@@ -1,6 +1,5 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { describe, expect, it } from "vitest";
-import { castAgentMessage } from "../test-helpers/agent-message-fixtures.js";
 import {
   CONTEXT_LIMIT_TRUNCATION_NOTICE,
   PREEMPTIVE_TOOL_RESULT_COMPACTION_PLACEHOLDER,
@@ -8,35 +7,35 @@ import {
 } from "./tool-result-context-guard.js";
 
 function makeUser(text: string): AgentMessage {
-  return castAgentMessage({
+  return {
     role: "user",
     content: text,
     timestamp: Date.now(),
-  });
+  } as unknown as AgentMessage;
 }
 
 function makeToolResult(id: string, text: string): AgentMessage {
-  return castAgentMessage({
+  return {
     role: "toolResult",
     toolCallId: id,
     toolName: "read",
     content: [{ type: "text", text }],
     isError: false,
     timestamp: Date.now(),
-  });
+  } as unknown as AgentMessage;
 }
 
 function makeLegacyToolResult(id: string, text: string): AgentMessage {
-  return castAgentMessage({
+  return {
     role: "tool",
     tool_call_id: id,
     tool_name: "read",
     content: text,
-  });
+  } as unknown as AgentMessage;
 }
 
 function makeToolResultWithDetails(id: string, text: string, detailText: string): AgentMessage {
-  return castAgentMessage({
+  return {
     role: "toolResult",
     toolCallId: id,
     toolName: "read",
@@ -50,7 +49,7 @@ function makeToolResultWithDetails(id: string, text: string, detailText: string)
     },
     isError: false,
     timestamp: Date.now(),
-  });
+  } as unknown as AgentMessage;
 }
 
 function getToolResultText(msg: AgentMessage): string {
@@ -200,10 +199,11 @@ describe("installToolResultContextGuard", () => {
 
   it("wraps an existing transformContext and guards the transformed output", async () => {
     const agent = makeGuardableAgent((messages) => {
-      return messages.map((msg) =>
-        castAgentMessage({
-          ...(msg as unknown as Record<string, unknown>),
-        }),
+      return messages.map(
+        (msg) =>
+          ({
+            ...(msg as unknown as Record<string, unknown>),
+          }) as unknown as AgentMessage,
       );
     });
     const contextForNextCall = makeTwoToolResultOverflowContext();
@@ -254,10 +254,10 @@ describe("installToolResultContextGuard", () => {
 
     await agent.transformContext?.(contextForNextCall, new AbortController().signal);
 
-    const oldResult = contextForNextCall[1] as {
+    const oldResult = contextForNextCall[1] as unknown as {
       details?: unknown;
     };
-    const newResult = contextForNextCall[2] as {
+    const newResult = contextForNextCall[2] as unknown as {
       details?: unknown;
     };
     const oldResultText = getToolResultText(contextForNextCall[1]);

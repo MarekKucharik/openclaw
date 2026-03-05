@@ -131,6 +131,29 @@ export function toWhatsappJid(number: string): string {
   return `${digits}@s.whatsapp.net`;
 }
 
+/**
+ * Convert E.164 phone number to WhatsApp JID, preferring @lid format if a mapping exists.
+ * Falls back to @s.whatsapp.net if no LID mapping found.
+ */
+export function e164ToWhatsappMentionJid(phone: string, opts?: JidToE164Options): string {
+  const digits = phone.replace(/\D/g, "");
+  // Try to read forward LID mapping: lid-mapping-{digits}.json
+  const mappingDirs = resolveLidMappingDirs(opts);
+  for (const dir of mappingDirs) {
+    const mappingPath = path.join(dir, `lid-mapping-${digits}.json`);
+    try {
+      const data = fs.readFileSync(mappingPath, "utf8");
+      const lid = JSON.parse(data) as string | null;
+      if (lid) {
+        return `${lid}@lid`;
+      }
+    } catch {
+      // Try next dir
+    }
+  }
+  return `${digits}@s.whatsapp.net`;
+}
+
 export type JidToE164Options = {
   authDir?: string;
   lidMappingDirs?: string[];

@@ -1,55 +1,51 @@
 import type { ExecApprovalRequestPayload } from "../infra/exec-approvals.js";
-import {
-  buildSystemRunApprovalBinding,
-  missingSystemRunApprovalBinding,
-  matchSystemRunApprovalBinding,
-  type SystemRunApprovalMatchResult,
-} from "../infra/system-run-approval-binding.js";
 
 export type SystemRunApprovalBinding = {
   cwd: string | null;
   agentId: string | null;
   sessionKey: string | null;
-  env?: unknown;
 };
 
-function requestMismatch(): SystemRunApprovalMatchResult {
-  return {
-    ok: false,
-    code: "APPROVAL_REQUEST_MISMATCH",
-    message: "approval id does not match request",
-  };
+function argvMatchesRequest(requestedArgv: string[], argv: string[]): boolean {
+  if (requestedArgv.length === 0 || requestedArgv.length !== argv.length) {
+    return false;
+  }
+  for (let i = 0; i < requestedArgv.length; i += 1) {
+    if (requestedArgv[i] !== argv[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
-export { toSystemRunApprovalMismatchError } from "../infra/system-run-approval-binding.js";
-export type { SystemRunApprovalMatchResult } from "../infra/system-run-approval-binding.js";
-
-export function evaluateSystemRunApprovalMatch(params: {
+export function approvalMatchesSystemRunRequest(params: {
+  cmdText: string;
   argv: string[];
   request: ExecApprovalRequestPayload;
   binding: SystemRunApprovalBinding;
-}): SystemRunApprovalMatchResult {
+}): boolean {
   if (params.request.host !== "node") {
-    return requestMismatch();
+    return false;
   }
 
-  const actualBinding = buildSystemRunApprovalBinding({
-    argv: params.argv,
-    cwd: params.binding.cwd,
-    agentId: params.binding.agentId,
-    sessionKey: params.binding.sessionKey,
-    env: params.binding.env,
-  });
-
-  const expectedBinding = params.request.systemRunBinding;
-  if (!expectedBinding) {
-    return missingSystemRunApprovalBinding({
-      actualEnvKeys: actualBinding.envKeys,
-    });
+  const requestedArgv = params.request.commandArgv;
+  if (Array.isArray(requestedArgv)) {
+    if (!argvMatchesRequest(requestedArgv, params.argv)) {
+      return false;
+    }
+  } else if (!params.cmdText || params.request.command !== params.cmdText) {
+    return false;
   }
-  return matchSystemRunApprovalBinding({
-    expected: expectedBinding,
-    actual: actualBinding.binding,
-    actualEnvKeys: actualBinding.envKeys,
-  });
+
+  if ((params.request.cwd ?? null) !== params.binding.cwd) {
+    return false;
+  }
+  if ((params.request.agentId ?? null) !== params.binding.agentId) {
+    return false;
+  }
+  if ((params.request.sessionKey ?? null) !== params.binding.sessionKey) {
+    return false;
+  }
+
+  return true;
 }

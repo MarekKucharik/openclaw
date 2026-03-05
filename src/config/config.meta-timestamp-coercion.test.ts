@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { validateConfigObject } from "./config.js";
+import { describe, expect, it, vi } from "vitest";
 
 describe("meta.lastTouchedAt numeric timestamp coercion", () => {
-  it("accepts a numeric Unix timestamp and coerces it to an ISO string", () => {
+  it("accepts a numeric Unix timestamp and coerces it to an ISO string", async () => {
+    vi.resetModules();
+    const { validateConfigObject } = await import("./config.js");
     const numericTimestamp = 1770394758161;
     const res = validateConfigObject({
       meta: {
@@ -16,7 +17,9 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
     }
   });
 
-  it("still accepts a string ISO timestamp unchanged", () => {
+  it("still accepts a string ISO timestamp unchanged", async () => {
+    vi.resetModules();
+    const { validateConfigObject } = await import("./config.js");
     const isoTimestamp = "2026-02-07T01:39:18.161Z";
     const res = validateConfigObject({
       meta: {
@@ -29,7 +32,9 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
     }
   });
 
-  it("rejects out-of-range numeric timestamps without throwing", () => {
+  it("rejects out-of-range numeric timestamps without throwing", async () => {
+    vi.resetModules();
+    const { validateConfigObject } = await import("./config.js");
     const res = validateConfigObject({
       meta: {
         lastTouchedAt: 1e20,
@@ -38,7 +43,9 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
     expect(res.ok).toBe(false);
   });
 
-  it("passes non-date strings through unchanged (backwards-compatible)", () => {
+  it("passes non-date strings through unchanged (backwards-compatible)", async () => {
+    vi.resetModules();
+    const { validateConfigObject } = await import("./config.js");
     const res = validateConfigObject({
       meta: {
         lastTouchedAt: "not-a-date",
@@ -50,7 +57,9 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
     }
   });
 
-  it("accepts meta with only lastTouchedVersion (no lastTouchedAt)", () => {
+  it("accepts meta with only lastTouchedVersion (no lastTouchedAt)", async () => {
+    vi.resetModules();
+    const { validateConfigObject } = await import("./config.js");
     const res = validateConfigObject({
       meta: {
         lastTouchedVersion: "2026.2.6",

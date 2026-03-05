@@ -29,19 +29,6 @@ function createHuggingfacePrompter(params: {
   return createWizardPrompter(overrides, { defaultSelect: "" });
 }
 
-type ApplyHuggingfaceParams = Parameters<typeof applyAuthChoiceHuggingface>[0];
-
-async function runHuggingfaceApply(
-  params: Omit<ApplyHuggingfaceParams, "authChoice" | "setDefaultModel"> &
-    Partial<Pick<ApplyHuggingfaceParams, "setDefaultModel">>,
-) {
-  return await applyAuthChoiceHuggingface({
-    authChoice: "huggingface-api-key",
-    setDefaultModel: params.setDefaultModel ?? true,
-    ...params,
-  });
-}
-
 describe("applyAuthChoiceHuggingface", () => {
   const lifecycle = createAuthTestLifecycle([
     "OPENCLAW_STATE_DIR",
@@ -88,10 +75,12 @@ describe("applyAuthChoiceHuggingface", () => {
     const prompter = createHuggingfacePrompter({ text, select });
     const runtime = createExitThrowingRuntime();
 
-    const result = await runHuggingfaceApply({
+    const result = await applyAuthChoiceHuggingface({
+      authChoice: "huggingface-api-key",
       config: {},
       prompter,
       runtime,
+      setDefaultModel: true,
     });
 
     expect(result).not.toBeNull();
@@ -143,10 +132,12 @@ describe("applyAuthChoiceHuggingface", () => {
     const prompter = createHuggingfacePrompter({ text, select, confirm });
     const runtime = createExitThrowingRuntime();
 
-    const result = await runHuggingfaceApply({
+    const result = await applyAuthChoiceHuggingface({
+      authChoice: "huggingface-api-key",
       config: {},
       prompter,
       runtime,
+      setDefaultModel: true,
       opts: {
         tokenProvider,
         token,
@@ -176,10 +167,12 @@ describe("applyAuthChoiceHuggingface", () => {
     const prompter = createHuggingfacePrompter({ text, select, note });
     const runtime = createExitThrowingRuntime();
 
-    const result = await runHuggingfaceApply({
+    const result = await applyAuthChoiceHuggingface({
+      authChoice: "huggingface-api-key",
       config: {},
       prompter,
       runtime,
+      setDefaultModel: true,
     });
 
     expect(result).not.toBeNull();

@@ -1,6 +1,6 @@
-import { loadConfig, type OpenClawConfig } from "../config/config.js";
+import { loadConfig } from "../config/config.js";
 import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
-import { kindFromMime } from "../media/mime.js";
+import { mediaKindFromMime } from "../media/constants.js";
 import { resolveOutboundAttachmentFromUrl } from "../media/outbound-attachment.js";
 import { resolveSignalAccount } from "./accounts.js";
 import { signalRpcRequest } from "./client.js";
@@ -8,7 +8,6 @@ import { markdownToSignalText, type SignalTextStyleRange } from "./format.js";
 import { resolveSignalRpcContext } from "./rpc-context.js";
 
 export type SignalSendOpts = {
-  cfg?: OpenClawConfig;
   baseUrl?: string;
   account?: string;
   accountId?: string;
@@ -101,7 +100,7 @@ export async function sendMessageSignal(
   text: string,
   opts: SignalSendOpts = {},
 ): Promise<SignalSendResult> {
-  const cfg = opts.cfg ?? loadConfig();
+  const cfg = loadConfig();
   const accountInfo = resolveSignalAccount({
     cfg,
     accountId: opts.accountId,
@@ -131,7 +130,7 @@ export async function sendMessageSignal(
       localRoots: opts.mediaLocalRoots,
     });
     attachments = [resolved.path];
-    const kind = kindFromMime(resolved.contentType ?? undefined);
+    const kind = mediaKindFromMime(resolved.contentType ?? undefined);
     if (!message && kind) {
       // Avoid sending an empty body when only attachments exist.
       message = kind === "image" ? "<media:image>" : `<media:${kind}>`;

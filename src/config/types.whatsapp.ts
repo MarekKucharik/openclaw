@@ -12,6 +12,9 @@ export type WhatsAppActionConfig = {
   reactions?: boolean;
   sendMessage?: boolean;
   polls?: boolean;
+  setProfilePicture?: boolean;
+  pin?: boolean;
+  setGroupIcon?: boolean;
 };
 
 export type WhatsAppGroupConfig = {
@@ -78,6 +81,12 @@ type WhatsAppSharedConfig = {
   debounceMs?: number;
   /** Heartbeat visibility settings. */
   heartbeat?: ChannelHeartbeatVisibilityConfig;
+  /** Inbound message handling options. */
+  inbound?: {
+    reactions?: boolean;
+    pollVotes?: "none" | "aggregate" | "individual" | "both";
+    pins?: boolean;
+  };
 };
 
 type WhatsAppConfigCore = {
@@ -99,8 +108,6 @@ export type WhatsAppConfig = WhatsAppConfigCore &
   WhatsAppSharedConfig & {
     /** Optional per-account WhatsApp configuration (multi-account). */
     accounts?: Record<string, WhatsAppAccountConfig>;
-    /** Optional default account id when multiple accounts are configured. */
-    defaultAccount?: string;
     /** Per-action tool gating (default: true for all). */
     actions?: WhatsAppActionConfig;
   };

@@ -32,7 +32,7 @@ async function withCronService(
     {
       makeStorePath,
       logger: noopLogger,
-      cronEnabled: false,
+      cronEnabled: true,
       runIsolatedAgentJob: params.runIsolatedAgentJob,
     },
     run,

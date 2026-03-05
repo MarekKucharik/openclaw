@@ -44,46 +44,13 @@ describe("applyAuthChoiceMiniMax", () => {
 
   async function readAuthProfiles(agentDir: string) {
     return await readAuthProfilesForAgent<{
-      profiles?: Record<string, { key?: string; keyRef?: { source: string; id: string } }>;
+      profiles?: Record<string, { key?: string }>;
     }>(agentDir);
   }
 
   function resetMiniMaxEnv(): void {
     delete process.env.MINIMAX_API_KEY;
     delete process.env.MINIMAX_OAUTH_TOKEN;
-  }
-
-  async function runMiniMaxChoice(params: {
-    authChoice: Parameters<typeof applyAuthChoiceMiniMax>[0]["authChoice"];
-    opts?: Parameters<typeof applyAuthChoiceMiniMax>[0]["opts"];
-    env?: { apiKey?: string; oauthToken?: string };
-    prompter?: Parameters<typeof createMinimaxPrompter>[0];
-  }) {
-    const agentDir = await setupTempState();
-    resetMiniMaxEnv();
-    if (params.env?.apiKey !== undefined) {
-      process.env.MINIMAX_API_KEY = params.env.apiKey;
-    }
-    if (params.env?.oauthToken !== undefined) {
-      process.env.MINIMAX_OAUTH_TOKEN = params.env.oauthToken;
-    }
-
-    const text = vi.fn(async () => "should-not-be-used");
-    const confirm = vi.fn(async () => true);
-    const result = await applyAuthChoiceMiniMax({
-      authChoice: params.authChoice,
-      config: {},
-      prompter: createMinimaxPrompter({
-        text,
-        confirm,
-        ...params.prompter,
-      }),
-      runtime: createExitThrowingRuntime(),
-      setDefaultModel: true,
-      ...(params.opts ? { opts: params.opts } : {}),
-    });
-
-    return { agentDir, result, text, confirm };
   }
 
   afterEach(async () => {
@@ -125,8 +92,18 @@ describe("applyAuthChoiceMiniMax", () => {
   ])(
     "$caseName",
     async ({ authChoice, tokenProvider, token, profileId, provider, expectedModel }) => {
-      const { agentDir, result, text, confirm } = await runMiniMaxChoice({
+      const agentDir = await setupTempState();
+      resetMiniMaxEnv();
+
+      const text = vi.fn(async () => "should-not-be-used");
+      const confirm = vi.fn(async () => true);
+
+      const result = await applyAuthChoiceMiniMax({
         authChoice,
+        config: {},
+        prompter: createMinimaxPrompter({ text, confirm }),
+        runtime: createExitThrowingRuntime(),
+        setDefaultModel: true,
         opts: {
           tokenProvider,
           token,
@@ -149,57 +126,50 @@ describe("applyAuthChoiceMiniMax", () => {
     },
   );
 
-  it.each([
-    {
-      name: "uses env token for minimax-api-key-cn as plaintext by default",
-      opts: undefined,
-      expectKey: "mm-env-token",
-      expectKeyRef: undefined,
-      expectConfirmCalls: 1,
-    },
-    {
-      name: "uses env token for minimax-api-key-cn as keyRef in ref mode",
-      opts: { secretInputMode: "ref" as const },
-      expectKey: undefined,
-      expectKeyRef: {
-        source: "env",
-        provider: "default",
-        id: "MINIMAX_API_KEY",
-      },
-      expectConfirmCalls: 0,
-    },
-  ])("$name", async ({ opts, expectKey, expectKeyRef, expectConfirmCalls }) => {
-    const { agentDir, result, text, confirm } = await runMiniMaxChoice({
+  it("uses env token for minimax-api-key-cn when confirmed", async () => {
+    const agentDir = await setupTempState();
+    process.env.MINIMAX_API_KEY = "mm-env-token";
+    delete process.env.MINIMAX_OAUTH_TOKEN;
+
+    const text = vi.fn(async () => "should-not-be-used");
+    const confirm = vi.fn(async () => true);
+
+    const result = await applyAuthChoiceMiniMax({
       authChoice: "minimax-api-key-cn",
-      opts,
-      env: { apiKey: "mm-env-token" },
+      config: {},
+      prompter: createMinimaxPrompter({ text, confirm }),
+      runtime: createExitThrowingRuntime(),
+      setDefaultModel: true,
     });
 
     expect(result).not.toBeNull();
-    if (!opts) {
-      expect(result?.config.auth?.profiles?.["minimax-cn:default"]).toMatchObject({
-        provider: "minimax-cn",
-        mode: "api_key",
-      });
-      expect(resolveAgentModelPrimaryValue(result?.config.agents?.defaults?.model)).toBe(
-        "minimax-cn/MiniMax-M2.5",
-      );
-    }
+    expect(result?.config.auth?.profiles?.["minimax-cn:default"]).toMatchObject({
+      provider: "minimax-cn",
+      mode: "api_key",
+    });
+    expect(resolveAgentModelPrimaryValue(result?.config.agents?.defaults?.model)).toBe(
+      "minimax-cn/MiniMax-M2.5",
+    );
     expect(text).not.toHaveBeenCalled();
-    expect(confirm).toHaveBeenCalledTimes(expectConfirmCalls);
+    expect(confirm).toHaveBeenCalled();
 
     const parsed = await readAuthProfiles(agentDir);
-    expect(parsed.profiles?.["minimax-cn:default"]?.key).toBe(expectKey);
-    if (expectKeyRef) {
-      expect(parsed.profiles?.["minimax-cn:default"]?.keyRef).toEqual(expectKeyRef);
-    } else {
-      expect(parsed.profiles?.["minimax-cn:default"]?.keyRef).toBeUndefined();
-    }
+    expect(parsed.profiles?.["minimax-cn:default"]?.key).toBe("mm-env-token");
   });
 
   it("uses minimax-api-lightning default model", async () => {
-    const { agentDir, result, text, confirm } = await runMiniMaxChoice({
+    const agentDir = await setupTempState();
+    resetMiniMaxEnv();
+
+    const text = vi.fn(async () => "should-not-be-used");
+    const confirm = vi.fn(async () => true);
+
+    const result = await applyAuthChoiceMiniMax({
       authChoice: "minimax-api-lightning",
+      config: {},
+      prompter: createMinimaxPrompter({ text, confirm }),
+      runtime: createExitThrowingRuntime(),
+      setDefaultModel: true,
       opts: {
         tokenProvider: "minimax",
         token: "mm-lightning-token",
@@ -212,7 +182,7 @@ describe("applyAuthChoiceMiniMax", () => {
       mode: "api_key",
     });
     expect(resolveAgentModelPrimaryValue(result?.config.agents?.defaults?.model)).toBe(
-      "minimax/MiniMax-M2.5-highspeed",
+      "minimax/MiniMax-M2.5-Lightning",
     );
     expect(text).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();

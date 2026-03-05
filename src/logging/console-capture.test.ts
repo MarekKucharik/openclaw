@@ -10,16 +10,27 @@ import {
   setLoggerOverride,
 } from "../logging.js";
 import { loggingState } from "./state.js";
-import {
-  captureConsoleSnapshot,
-  type ConsoleSnapshot,
-  restoreConsoleSnapshot,
-} from "./test-helpers/console-snapshot.js";
+
+type ConsoleSnapshot = {
+  log: typeof console.log;
+  info: typeof console.info;
+  warn: typeof console.warn;
+  error: typeof console.error;
+  debug: typeof console.debug;
+  trace: typeof console.trace;
+};
 
 let snapshot: ConsoleSnapshot;
 
 beforeEach(() => {
-  snapshot = captureConsoleSnapshot();
+  snapshot = {
+    log: console.log,
+    info: console.info,
+    warn: console.warn,
+    error: console.error,
+    debug: console.debug,
+    trace: console.trace,
+  };
   loggingState.consolePatched = false;
   loggingState.forceConsoleToStderr = false;
   loggingState.consoleTimestampPrefix = false;
@@ -28,7 +39,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  restoreConsoleSnapshot(snapshot);
+  console.log = snapshot.log;
+  console.info = snapshot.info;
+  console.warn = snapshot.warn;
+  console.error = snapshot.error;
+  console.debug = snapshot.debug;
+  console.trace = snapshot.trace;
   loggingState.consolePatched = false;
   loggingState.forceConsoleToStderr = false;
   loggingState.consoleTimestampPrefix = false;

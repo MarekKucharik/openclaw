@@ -7,12 +7,8 @@ import type {
 } from "../config/types.approvals.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { normalizeAccountId, parseAgentSessionKey } from "../routing/session-key.js";
-import { compileSafeRegex, testRegexWithBoundedInput } from "../security/safe-regex.js";
-import {
-  isDeliverableMessageChannel,
-  normalizeMessageChannel,
-  type DeliverableMessageChannel,
-} from "../utils/message-channel.js";
+import { compileSafeRegex } from "../security/safe-regex.js";
+import { isDeliverableMessageChannel, normalizeMessageChannel } from "../utils/message-channel.js";
 import type {
   ExecApprovalDecision,
   ExecApprovalRequest,
@@ -22,6 +18,7 @@ import { deliverOutboundPayloads } from "./outbound/deliver.js";
 import { resolveSessionDeliveryTarget } from "./outbound/targets.js";
 
 const log = createSubsystemLogger("gateway/exec-approvals");
+
 export type { ExecApprovalRequest, ExecApprovalResolved };
 
 type ForwardTarget = ExecApprovalForwardTarget & { source: "session" | "target" };
@@ -60,7 +57,7 @@ function matchSessionFilter(sessionKey: string, patterns: string[]): boolean {
       return true;
     }
     const regex = compileSafeRegex(pattern);
-    return regex ? testRegexWithBoundedInput(regex, sessionKey) : false;
+    return regex ? regex.test(sessionKey) : false;
   });
 }
 
@@ -174,9 +171,6 @@ function buildRequestMessage(request: ExecApprovalRequest, nowMs: number) {
   if (request.request.nodeId) {
     lines.push(`Node: ${request.request.nodeId}`);
   }
-  if (Array.isArray(request.request.envKeys) && request.request.envKeys.length > 0) {
-    lines.push(`Env overrides: ${request.request.envKeys.join(", ")}`);
-  }
   if (request.request.host) {
     lines.push(`Host: ${request.request.host}`);
   }
@@ -215,11 +209,6 @@ function buildExpiredMessage(request: ExecApprovalRequest) {
   return `⏱️ Exec approval expired. ID: ${request.id}`;
 }
 
-function normalizeTurnSourceChannel(value?: string | null): DeliverableMessageChannel | undefined {
-  const normalized = value ? normalizeMessageChannel(value) : undefined;
-  return normalized && isDeliverableMessageChannel(normalized) ? normalized : undefined;
-}
-
 function defaultResolveSessionTarget(params: {
   cfg: OpenClawConfig;
   request: ExecApprovalRequest;
@@ -236,14 +225,7 @@ function defaultResolveSessionTarget(params: {
   if (!entry) {
     return null;
   }
-  const target = resolveSessionDeliveryTarget({
-    entry,
-    requestedChannel: "last",
-    turnSourceChannel: normalizeTurnSourceChannel(params.request.request.turnSourceChannel),
-    turnSourceTo: params.request.request.turnSourceTo?.trim() || undefined,
-    turnSourceAccountId: params.request.request.turnSourceAccountId?.trim() || undefined,
-    turnSourceThreadId: params.request.request.turnSourceThreadId ?? undefined,
-  });
+  const target = resolveSessionDeliveryTarget({ entry, requestedChannel: "last" });
   if (!target.channel || !target.to) {
     return null;
   }

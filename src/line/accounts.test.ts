@@ -100,39 +100,6 @@ describe("LINE accounts", () => {
   });
 
   describe("resolveDefaultLineAccountId", () => {
-    it("prefers channels.line.defaultAccount when configured", () => {
-      const cfg: OpenClawConfig = {
-        channels: {
-          line: {
-            defaultAccount: "business",
-            accounts: {
-              business: { enabled: true },
-              support: { enabled: true },
-            },
-          },
-        },
-      };
-
-      const id = resolveDefaultLineAccountId(cfg);
-      expect(id).toBe("business");
-    });
-
-    it("normalizes channels.line.defaultAccount before lookup", () => {
-      const cfg: OpenClawConfig = {
-        channels: {
-          line: {
-            defaultAccount: "Business Ops",
-            accounts: {
-              "business-ops": { enabled: true },
-            },
-          },
-        },
-      };
-
-      const id = resolveDefaultLineAccountId(cfg);
-      expect(id).toBe("business-ops");
-    });
-
     it("returns first named account when default not configured", () => {
       const cfg: OpenClawConfig = {
         channels: {
@@ -146,22 +113,6 @@ describe("LINE accounts", () => {
 
       const id = resolveDefaultLineAccountId(cfg);
 
-      expect(id).toBe("business");
-    });
-
-    it("falls back when channels.line.defaultAccount is missing", () => {
-      const cfg: OpenClawConfig = {
-        channels: {
-          line: {
-            defaultAccount: "missing",
-            accounts: {
-              business: { enabled: true },
-            },
-          },
-        },
-      };
-
-      const id = resolveDefaultLineAccountId(cfg);
       expect(id).toBe("business");
     });
   });

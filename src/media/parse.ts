@@ -79,10 +79,6 @@ function unwrapQuoted(value: string): string | undefined {
   return trimmed.slice(1, -1).trim();
 }
 
-function mayContainFenceMarkers(input: string): boolean {
-  return input.includes("```") || input.includes("~~~");
-}
-
 // Check if a character offset is inside any fenced code block
 function isInsideFence(fenceSpans: Array<{ start: number; end: number }>, offset: number): boolean {
   return fenceSpans.some((span) => offset >= span.start && offset < span.end);
@@ -100,18 +96,12 @@ export function splitMediaFromOutput(raw: string): {
   if (!trimmedRaw.trim()) {
     return { text: "" };
   }
-  const mayContainMediaToken = /media:/i.test(trimmedRaw);
-  const mayContainAudioTag = trimmedRaw.includes("[[");
-  if (!mayContainMediaToken && !mayContainAudioTag) {
-    return { text: trimmedRaw };
-  }
 
   const media: string[] = [];
   let foundMediaToken = false;
 
   // Parse fenced code blocks to avoid extracting MEDIA tokens from inside them
-  const hasFenceMarkers = mayContainFenceMarkers(trimmedRaw);
-  const fenceSpans = hasFenceMarkers ? parseFenceSpans(trimmedRaw) : [];
+  const fenceSpans = parseFenceSpans(trimmedRaw);
 
   // Collect tokens line by line so we can strip them cleanly.
   const lines = trimmedRaw.split("\n");
@@ -120,7 +110,7 @@ export function splitMediaFromOutput(raw: string): {
   let lineOffset = 0; // Track character offset for fence checking
   for (const line of lines) {
     // Skip MEDIA extraction if this line is inside a fenced code block
-    if (hasFenceMarkers && isInsideFence(fenceSpans, lineOffset)) {
+    if (isInsideFence(fenceSpans, lineOffset)) {
       keptLines.push(line);
       lineOffset += line.length + 1; // +1 for newline
       continue;

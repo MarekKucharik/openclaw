@@ -1,3 +1,5 @@
+import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type } from "@sinclair/typebox";
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
@@ -5,7 +7,16 @@ import {
   isToolAllowedByPolicyName,
   resolveSubagentToolPolicy,
 } from "./pi-tools.policy.js";
-import { createStubTool } from "./test-helpers/pi-tool-stubs.js";
+
+function createStubTool(name: string): AgentTool {
+  return {
+    name,
+    label: name,
+    description: "",
+    parameters: Type.Object({}),
+    execute: async () => ({}) as AgentToolResult<unknown>,
+  };
+}
 
 describe("pi-tools.policy", () => {
   it("treats * in allow as allow-all", () => {

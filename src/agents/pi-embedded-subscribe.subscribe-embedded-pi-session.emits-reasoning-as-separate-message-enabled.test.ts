@@ -2,7 +2,6 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import {
   THINKING_TAG_CASES,
-  createReasoningFinalAnswerMessage,
   createStubSessionHarness,
 } from "./pi-embedded-subscribe.e2e-harness.js";
 import { subscribeEmbeddedPiSession } from "./pi-embedded-subscribe.js";
@@ -32,7 +31,13 @@ describe("subscribeEmbeddedPiSession", () => {
   it("emits reasoning as a separate message when enabled", () => {
     const { emit, onBlockReply } = createReasoningBlockReplyHarness();
 
-    const assistantMessage = createReasoningFinalAnswerMessage();
+    const assistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Because it helps" },
+        { type: "text", text: "Final answer" },
+      ],
+    } as AssistantMessage;
 
     emit({ type: "message_end", message: assistantMessage });
 

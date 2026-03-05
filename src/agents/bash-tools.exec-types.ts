@@ -21,9 +21,6 @@ export type ExecToolDefaults = {
   scopeKey?: string;
   sessionKey?: string;
   messageProvider?: string;
-  currentChannelId?: string;
-  currentThreadTs?: string;
-  accountId?: string;
   notifyOnExit?: boolean;
   notifyOnExitEmptySuccess?: boolean;
   cwd?: string;

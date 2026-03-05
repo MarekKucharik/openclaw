@@ -28,16 +28,6 @@ describe("Agent-specific tool filtering", () => {
     stat: async () => null,
   };
 
-  function expectReadOnlyToolSet(toolNames: string[], extraDenied: string[] = []) {
-    expect(toolNames).toContain("read");
-    expect(toolNames).not.toContain("exec");
-    expect(toolNames).not.toContain("write");
-    expect(toolNames).not.toContain("apply_patch");
-    for (const toolName of extraDenied) {
-      expect(toolNames).not.toContain(toolName);
-    }
-  }
-
   async function withApplyPatchEscapeCase(
     opts: { workspaceOnly?: boolean },
     run: (params: {
@@ -260,10 +250,12 @@ describe("Agent-specific tool filtering", () => {
       agentDir: "/tmp/agent-restricted",
     });
 
-    expectReadOnlyToolSet(
-      tools.map((t) => t.name),
-      ["edit"],
-    );
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).toContain("read");
+    expect(toolNames).not.toContain("exec");
+    expect(toolNames).not.toContain("write");
+    expect(toolNames).not.toContain("apply_patch");
+    expect(toolNames).not.toContain("edit");
   });
 
   it("should apply provider-specific tool policy", () => {
@@ -287,7 +279,11 @@ describe("Agent-specific tool filtering", () => {
       modelId: "claude-opus-4-6-thinking",
     });
 
-    expectReadOnlyToolSet(tools.map((t) => t.name));
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).toContain("read");
+    expect(toolNames).not.toContain("exec");
+    expect(toolNames).not.toContain("write");
+    expect(toolNames).not.toContain("apply_patch");
   });
 
   it("should apply provider-specific tool profile overrides", () => {

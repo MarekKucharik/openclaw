@@ -9,7 +9,6 @@ import { parsePositiveIntOrUndefined } from "../program/helpers.js";
 import {
   getCronChannelOptions,
   parseAt,
-  parseCronStaggerMs,
   parseDurationMs,
   printCronList,
   warnIfCronSchedulerDisabled,
@@ -72,7 +71,6 @@ export function registerCronAddCommand(cron: Command) {
       .option("--keep-after-run", "Keep one-shot job after it succeeds", false)
       .option("--agent <id>", "Agent id for this job")
       .option("--session <target>", "Session target (main|isolated)")
-      .option("--session-key <key>", "Session key for job routing (e.g. agent:my-agent:my-session)")
       .option("--wake <mode>", "Wake mode (now|next-heartbeat)", "now")
       .option("--at <when>", "Run once at time (ISO) or +duration (e.g. 20m)")
       .option("--every <duration>", "Run every duration (e.g. 10m, 1h)")
@@ -85,7 +83,6 @@ export function registerCronAddCommand(cron: Command) {
       .option("--thinking <level>", "Thinking level for agent jobs (off|minimal|low|medium|high)")
       .option("--model <model>", "Model override for agent jobs (provider/model or alias)")
       .option("--timeout-seconds <n>", "Timeout seconds for agent jobs")
-      .option("--light-context", "Use lightweight bootstrap context for agent jobs", false)
       .option("--announce", "Announce summary to a chat (subagent-style)", false)
       .option("--deliver", "Deprecated (use --announce). Announces a summary to a chat.")
       .option("--no-deliver", "Disable announce delivery and skip main-session summary")
@@ -94,7 +91,6 @@ export function registerCronAddCommand(cron: Command) {
         "--to <dest>",
         "Delivery destination (E.164, Telegram chatId, or Discord channel/user)",
       )
-      .option("--account <id>", "Channel account id for delivery (multi-account setups)")
       .option("--best-effort-deliver", "Do not fail the job if delivery fails", false)
       .option("--json", "Output JSON", false)
       .action(async (opts: GatewayRpcOpts & Record<string, unknown>, cmd?: Command) => {
@@ -130,7 +126,19 @@ export function registerCronAddCommand(cron: Command) {
               }
               return { kind: "every" as const, everyMs };
             }
-            const staggerMs = parseCronStaggerMs({ staggerRaw, useExact });
+            const staggerMs = (() => {
+              if (useExact) {
+                return 0;
+              }
+              if (!staggerRaw) {
+                return undefined;
+              }
+              const parsed = parseDurationMs(staggerRaw);
+              if (!parsed) {
+                throw new Error("Invalid --stagger; use e.g. 30s, 1m, 5m");
+              }
+              return parsed;
+            })();
             return {
               kind: "cron" as const,
               expr: cronExpr,
@@ -179,7 +187,6 @@ export function registerCronAddCommand(cron: Command) {
                   : undefined,
               timeoutSeconds:
                 timeoutSeconds && Number.isFinite(timeoutSeconds) ? timeoutSeconds : undefined,
-              lightContext: opts.lightContext === true ? true : undefined,
             };
           })();
 
@@ -213,15 +220,6 @@ export function registerCronAddCommand(cron: Command) {
             throw new Error("--announce/--no-deliver require --session isolated.");
           }
 
-          const accountId =
-            typeof opts.account === "string" && opts.account.trim()
-              ? opts.account.trim()
-              : undefined;
-
-          if (accountId && (sessionTarget !== "isolated" || payload.kind !== "agentTurn")) {
-            throw new Error("--account requires an isolated agentTurn job with delivery.");
-          }
-
           const deliveryMode =
             sessionTarget === "isolated" && payload.kind === "agentTurn"
               ? hasAnnounce
@@ -242,18 +240,12 @@ export function registerCronAddCommand(cron: Command) {
               ? opts.description.trim()
               : undefined;
 
-          const sessionKey =
-            typeof opts.sessionKey === "string" && opts.sessionKey.trim()
-              ? opts.sessionKey.trim()
-              : undefined;
-
           const params = {
             name,
             description,
             enabled: !opts.disabled,
             deleteAfterRun: opts.deleteAfterRun ? true : opts.keepAfterRun ? false : undefined,
             agentId,
-            sessionKey,
             schedule,
             sessionTarget,
             wakeMode,
@@ -266,7 +258,6 @@ export function registerCronAddCommand(cron: Command) {
                       ? opts.channel.trim()
                       : undefined,
                   to: typeof opts.to === "string" && opts.to.trim() ? opts.to.trim() : undefined,
-                  accountId,
                   bestEffort: opts.bestEffortDeliver ? true : undefined,
                 }
               : undefined,

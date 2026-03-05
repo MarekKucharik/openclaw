@@ -32,7 +32,7 @@ describe("web monitor inbox", () => {
     const sock = getSock();
     sock.ev.emit("messages.upsert", upsert);
     await new Promise((resolve) => setImmediate(resolve));
-    return { onMessage, listener, sock };
+    return { onMessage, listener };
   }
 
   function expectSingleGroupMessage(
@@ -44,7 +44,10 @@ describe("web monitor inbox", () => {
   }
 
   it("captures media path for image messages", async () => {
-    const { onMessage, listener, sock } = await runSingleUpsertAndCapture({
+    const onMessage = vi.fn();
+    const listener = await openMonitor(onMessage);
+    const sock = getSock();
+    const upsert = {
       type: "notify",
       messages: [
         {
@@ -53,7 +56,10 @@ describe("web monitor inbox", () => {
           messageTimestamp: 1_700_000_100,
         },
       ],
-    });
+    };
+
+    sock.ev.emit("messages.upsert", upsert);
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(onMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -110,7 +116,10 @@ describe("web monitor inbox", () => {
     const logPath = path.join(os.tmpdir(), `openclaw-log-test-${crypto.randomUUID()}.log`);
     setLoggerOverride({ level: "trace", file: logPath });
 
-    const { listener } = await runSingleUpsertAndCapture({
+    const onMessage = vi.fn();
+    const listener = await openMonitor(onMessage);
+    const sock = getSock();
+    const upsert = {
       type: "notify",
       messages: [
         {
@@ -120,7 +129,10 @@ describe("web monitor inbox", () => {
           pushName: "Tester",
         },
       ],
-    });
+    };
+
+    sock.ev.emit("messages.upsert", upsert);
+    await new Promise((resolve) => setImmediate(resolve));
 
     await vi.waitFor(
       () => {
@@ -135,7 +147,10 @@ describe("web monitor inbox", () => {
   });
 
   it("includes participant when marking group messages read", async () => {
-    const { listener, sock } = await runSingleUpsertAndCapture({
+    const onMessage = vi.fn();
+    const listener = await openMonitor(onMessage);
+    const sock = getSock();
+    const upsert = {
       type: "notify",
       messages: [
         {
@@ -148,7 +163,10 @@ describe("web monitor inbox", () => {
           message: { conversation: "group ping" },
         },
       ],
-    });
+    };
+
+    sock.ev.emit("messages.upsert", upsert);
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(sock.readMessages).toHaveBeenCalledWith([
       {
@@ -162,7 +180,10 @@ describe("web monitor inbox", () => {
   });
 
   it("passes through group messages with participant metadata", async () => {
-    const { onMessage, listener } = await runSingleUpsertAndCapture({
+    const onMessage = vi.fn();
+    const listener = await openMonitor(onMessage);
+    const sock = getSock();
+    const upsert = {
       type: "notify",
       messages: [
         {
@@ -182,7 +203,10 @@ describe("web monitor inbox", () => {
           messageTimestamp: 1_700_000_000,
         },
       ],
-    });
+    };
+
+    sock.ev.emit("messages.upsert", upsert);
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(onMessage).toHaveBeenCalledWith(
       expect.objectContaining({

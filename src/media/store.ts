@@ -14,9 +14,6 @@ const resolveMediaDir = () => path.join(resolveConfigDir(), "media");
 export const MEDIA_MAX_BYTES = 5 * 1024 * 1024; // 5MB default
 const MAX_BYTES = MEDIA_MAX_BYTES;
 const DEFAULT_TTL_MS = 2 * 60 * 1000; // 2 minutes
-// Files are intentionally readable by non-owner UIDs so Docker sandbox containers can access
-// inbound media. The containing state/media directories remain 0o700, which is the trust boundary.
-const MEDIA_FILE_MODE = 0o644;
 type RequestImpl = typeof httpRequest;
 type ResolvePinnedHostnameImpl = typeof resolvePinnedHostname;
 
@@ -173,7 +170,7 @@ async function downloadToFile(
           let total = 0;
           const sniffChunks: Buffer[] = [];
           let sniffLen = 0;
-          const out = createWriteStream(dest, { mode: MEDIA_FILE_MODE });
+          const out = createWriteStream(dest, { mode: 0o600 });
           res.on("data", (chunk) => {
             total += chunk.length;
             if (sniffLen < 16384) {
@@ -244,10 +241,6 @@ function toSaveMediaSourceError(err: SafeOpenError): SaveMediaSourceError {
       return new SaveMediaSourceError("too-large", "Media exceeds 5MB limit", { cause: err });
     case "not-found":
       return new SaveMediaSourceError("not-found", "Media path does not exist", { cause: err });
-    case "outside-workspace":
-      return new SaveMediaSourceError("invalid-path", "Media path is outside workspace root", {
-        cause: err,
-      });
     case "invalid-path":
     default:
       return new SaveMediaSourceError("invalid-path", "Media path is not safe to read", {
@@ -287,7 +280,7 @@ export async function saveMediaSource(
     const ext = extensionForMime(mime) ?? path.extname(source);
     const id = ext ? `${baseId}${ext}` : baseId;
     const dest = path.join(dir, id);
-    await fs.writeFile(dest, buffer, { mode: MEDIA_FILE_MODE });
+    await fs.writeFile(dest, buffer, { mode: 0o600 });
     return { id, path: dest, size: stat.size, contentType: mime };
   } catch (err) {
     if (err instanceof SafeOpenError) {
@@ -326,6 +319,6 @@ export async function saveMediaBuffer(
   }
 
   const dest = path.join(dir, id);
-  await fs.writeFile(dest, buffer, { mode: MEDIA_FILE_MODE });
+  await fs.writeFile(dest, buffer, { mode: 0o600 });
   return { id, path: dest, size: buffer.byteLength, contentType: mime };
 }

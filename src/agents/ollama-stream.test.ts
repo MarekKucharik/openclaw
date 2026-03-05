@@ -302,10 +302,9 @@ async function withMockNdjsonFetch(
 
 async function createOllamaTestStream(params: {
   baseUrl: string;
-  defaultHeaders?: Record<string, string>;
-  options?: { maxTokens?: number; signal?: AbortSignal; headers?: Record<string, string> };
+  options?: { maxTokens?: number; signal?: AbortSignal };
 }) {
-  const streamFn = createOllamaStreamFn(params.baseUrl, params.defaultHeaders);
+  const streamFn = createOllamaStreamFn(params.baseUrl);
   return streamFn(
     {
       id: "qwen3:32b",
@@ -358,41 +357,6 @@ describe("createOllamaStreamFn", () => {
         };
         expect(requestBody.options.num_ctx).toBe(131072);
         expect(requestBody.options.num_predict).toBe(123);
-      },
-    );
-  });
-
-  it("merges default headers and allows request headers to override them", async () => {
-    await withMockNdjsonFetch(
-      [
-        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"ok"},"done":false}',
-        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1}',
-      ],
-      async (fetchMock) => {
-        const stream = await createOllamaTestStream({
-          baseUrl: "http://ollama-host:11434",
-          defaultHeaders: {
-            "X-OLLAMA-KEY": "provider-secret",
-            "X-Trace": "default",
-          },
-          options: {
-            headers: {
-              "X-Trace": "request",
-              "X-Request-Only": "1",
-            },
-          },
-        });
-
-        const events = await collectStreamEvents(stream);
-        expect(events.at(-1)?.type).toBe("done");
-
-        const [, requestInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-        expect(requestInit.headers).toMatchObject({
-          "Content-Type": "application/json",
-          "X-OLLAMA-KEY": "provider-secret",
-          "X-Trace": "request",
-          "X-Request-Only": "1",
-        });
       },
     );
   });

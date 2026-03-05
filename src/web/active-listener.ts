@@ -6,6 +6,8 @@ export type ActiveWebSendOptions = {
   gifPlayback?: boolean;
   accountId?: string;
   fileName?: string;
+  mentions?: string[];
+  mentionAll?: boolean;
 };
 
 export type ActiveWebListener = {
@@ -25,6 +27,15 @@ export type ActiveWebListener = {
     participant?: string,
   ) => Promise<void>;
   sendComposingTo: (to: string) => Promise<void>;
+  updateProfilePicture?: (imageBuffer: Buffer) => Promise<void>;
+  removeProfilePicture?: () => Promise<void>;
+  pinMessage?: (
+    chatJid: string,
+    messageId: string,
+    type: 1 | 2,
+    duration?: number,
+    fromMe?: boolean,
+  ) => Promise<void>;
   close?: () => Promise<void>;
 };
 

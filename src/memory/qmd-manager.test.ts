@@ -131,12 +131,11 @@ describe("QmdMemoryManager", () => {
     logDebugMock.mockClear();
     logInfoMock.mockClear();
     tmpRoot = path.join(fixtureRoot, `case-${fixtureCount++}`);
-    workspaceDir = path.join(tmpRoot, "workspace");
-    stateDir = path.join(tmpRoot, "state");
     await fs.mkdir(tmpRoot);
-    // Only workspace must exist for configured collection paths; state paths are
-    // created lazily by manager code when needed.
+    workspaceDir = path.join(tmpRoot, "workspace");
     await fs.mkdir(workspaceDir);
+    stateDir = path.join(tmpRoot, "state");
+    await fs.mkdir(stateDir);
     process.env.OPENCLAW_STATE_DIR = stateDir;
     cfg = {
       agents: {
@@ -153,7 +152,7 @@ describe("QmdMemoryManager", () => {
     } as OpenClawConfig;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
     delete process.env.OPENCLAW_STATE_DIR;
     delete (globalThis as Record<string, unknown>).__openclawMcporterDaemonStart;
@@ -886,7 +885,7 @@ describe("QmdMemoryManager", () => {
     await manager.close();
   });
 
-  it("resolves bare qmd command to a Windows-compatible spawn invocation", async () => {
+  it("uses qmd.cmd on Windows when qmd command is bare", async () => {
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     try {
       const { manager } = await createManager({ mode: "status" });
@@ -894,23 +893,11 @@ describe("QmdMemoryManager", () => {
 
       const qmdCalls = spawnMock.mock.calls.filter((call: unknown[]) => {
         const args = call[1] as string[] | undefined;
-        return (
-          Array.isArray(args) &&
-          args.some((token) => token === "update" || token === "search" || token === "query")
-        );
+        return Array.isArray(args) && args.length > 0;
       });
       expect(qmdCalls.length).toBeGreaterThan(0);
       for (const call of qmdCalls) {
-        const command = String(call[0]);
-        const options = call[2] as { shell?: boolean } | undefined;
-        if (/(^|[\\/])qmd(?:\.cmd)?$/i.test(command)) {
-          // Wrapper unresolved: keep `.cmd` and use shell for PATHEXT lookup.
-          expect(command.toLowerCase().endsWith("qmd.cmd")).toBe(true);
-          expect(options?.shell).toBe(true);
-        } else {
-          // Wrapper resolved to node/exe entrypoint: shell fallback should not be used.
-          expect(options?.shell).not.toBe(true);
-        }
+        expect(call[0]).toBe("qmd.cmd");
       }
 
       await manager.close();
@@ -1415,20 +1402,11 @@ describe("QmdMemoryManager", () => {
       const { manager } = await createManager();
       await manager.search("hello", { sessionKey: "agent:main:slack:dm:u123" });
 
-      const mcporterCall = spawnMock.mock.calls.find((call: unknown[]) =>
-        (call[1] as string[] | undefined)?.includes("call"),
+      const mcporterCall = spawnMock.mock.calls.find(
+        (call: unknown[]) => (call[1] as string[] | undefined)?.[0] === "call",
       );
       expect(mcporterCall).toBeDefined();
-      const callCommand = mcporterCall?.[0];
-      expect(typeof callCommand).toBe("string");
-      const options = mcporterCall?.[2] as { shell?: boolean } | undefined;
-      if (isMcporterCommand(callCommand)) {
-        expect(callCommand).toBe("mcporter.cmd");
-        expect(options?.shell).toBe(true);
-      } else {
-        // If wrapper entrypoint resolution succeeded, spawn may invoke node/exe directly.
-        expect(options?.shell).not.toBe(true);
-      }
+      expect(mcporterCall?.[0]).toBe("mcporter.cmd");
 
       await manager.close();
     } finally {
@@ -1783,25 +1761,6 @@ describe("QmdMemoryManager", () => {
     }
   });
 
-  it("succeeds on qmd update even when stdout exceeds the output cap", async () => {
-    // Regression test for #24966: large indexes produce >200K chars of stdout
-    // during `qmd update`, which used to fail with "produced too much output".
-    const largeOutput = "x".repeat(300_000);
-    spawnMock.mockImplementation((_cmd: string, args: string[]) => {
-      if (args[0] === "update") {
-        const child = createMockChild({ autoClose: false });
-        emitAndClose(child, "stdout", largeOutput);
-        return child;
-      }
-      return createMockChild();
-    });
-
-    const { manager } = await createManager({ mode: "status" });
-    // sync triggers runQmdUpdateOnce -> runQmd(["update"], { discardOutput: true })
-    await expect(manager.sync({ reason: "manual" })).resolves.toBeUndefined();
-    await manager.close();
-  });
-
   it("scopes by channel for agent-prefixed session keys", async () => {
     cfg = {
       ...cfg,
@@ -1946,10 +1905,10 @@ describe("QmdMemoryManager", () => {
   });
 
   it("reuses exported session markdown files when inputs are unchanged", async () => {
+    const writeFileSpy = vi.spyOn(fs, "writeFile");
     const sessionsDir = path.join(stateDir, "agents", agentId, "sessions");
     await fs.mkdir(sessionsDir, { recursive: true });
     const sessionFile = path.join(sessionsDir, "session-1.jsonl");
-    const exportFile = path.join(stateDir, "agents", agentId, "qmd", "sessions", "session-1.md");
     await fs.writeFile(
       sessionFile,
       '{"type":"message","message":{"role":"user","content":"hello"}}\n',
@@ -1972,17 +1931,24 @@ describe("QmdMemoryManager", () => {
 
     const { manager } = await createManager();
 
-    try {
-      await manager.sync({ reason: "manual" });
-      const firstExport = await fs.readFile(exportFile, "utf-8");
-      expect(firstExport).toContain("hello");
+    const reasonCount = writeFileSpy.mock.calls.length;
+    await manager.sync({ reason: "manual" });
+    const firstExportWrites = writeFileSpy.mock.calls.length;
+    expect(firstExportWrites).toBe(reasonCount + 1);
 
-      await manager.sync({ reason: "manual" });
-      const secondExport = await fs.readFile(exportFile, "utf-8");
-      expect(secondExport).toBe(firstExport);
-    } finally {
-      await manager.close();
-    }
+    await manager.sync({ reason: "manual" });
+    expect(writeFileSpy.mock.calls.length).toBe(firstExportWrites);
+
+    await fs.writeFile(
+      sessionFile,
+      '{"type":"message","message":{"role":"user","content":"follow-up update"}}\n',
+      "utf-8",
+    );
+    await manager.sync({ reason: "manual" });
+    expect(writeFileSpy.mock.calls.length).toBe(firstExportWrites + 1);
+
+    await manager.close();
+    writeFileSpy.mockRestore();
   });
 
   it("fails closed when sqlite index is busy during doc lookup or search", async () => {

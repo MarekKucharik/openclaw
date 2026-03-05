@@ -125,12 +125,6 @@ import {
 } from "./nodes.js";
 import { PushTestParamsSchema, PushTestResultSchema } from "./push.js";
 import {
-  SecretsReloadParamsSchema,
-  SecretsResolveAssignmentSchema,
-  SecretsResolveParamsSchema,
-  SecretsResolveResultSchema,
-} from "./secrets.js";
-import {
   SessionsCompactParamsSchema,
   SessionsDeleteParamsSchema,
   SessionsListParamsSchema,
@@ -152,7 +146,7 @@ import {
   WizardStepSchema,
 } from "./wizard.js";
 
-export const ProtocolSchemas = {
+export const ProtocolSchemas: Record<string, TSchema> = {
   ConnectParams: ConnectParamsSchema,
   HelloOk: HelloOkSchema,
   RequestFrame: RequestFrameSchema,
@@ -185,10 +179,6 @@ export const ProtocolSchemas = {
   NodeInvokeRequestEvent: NodeInvokeRequestEventSchema,
   PushTestParams: PushTestParamsSchema,
   PushTestResult: PushTestResultSchema,
-  SecretsReloadParams: SecretsReloadParamsSchema,
-  SecretsResolveParams: SecretsResolveParamsSchema,
-  SecretsResolveAssignment: SecretsResolveAssignmentSchema,
-  SecretsResolveResult: SecretsResolveResultSchema,
   SessionsListParams: SessionsListParamsSchema,
   SessionsPreviewParams: SessionsPreviewParamsSchema,
   SessionsResolveParams: SessionsResolveParamsSchema,
@@ -282,6 +272,6 @@ export const ProtocolSchemas = {
   UpdateRunParams: UpdateRunParamsSchema,
   TickEvent: TickEventSchema,
   ShutdownEvent: ShutdownEventSchema,
-} satisfies Record<string, TSchema>;
+};
 
 export const PROTOCOL_VERSION = 3 as const;

@@ -242,7 +242,7 @@ const BASE_AUTH_CHOICE_OPTIONS: ReadonlyArray<AuthChoiceOption> = [
   {
     value: "google-gemini-cli",
     label: "Google Gemini CLI OAuth",
-    hint: "Unofficial flow; review account-risk warning before use",
+    hint: "Uses the bundled Gemini CLI auth plugin",
   },
   { value: "zai-api-key", label: "Z.AI API key" },
   {
@@ -294,8 +294,8 @@ const BASE_AUTH_CHOICE_OPTIONS: ReadonlyArray<AuthChoiceOption> = [
   },
   {
     value: "minimax-api-lightning",
-    label: "MiniMax M2.5 Highspeed",
-    hint: "Official fast tier (legacy: Lightning)",
+    label: "MiniMax M2.5 Lightning",
+    hint: "Faster, higher output cost",
   },
   { value: "custom-api-key", label: "Custom Provider" },
 ];

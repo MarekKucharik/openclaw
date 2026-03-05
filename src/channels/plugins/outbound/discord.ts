@@ -1,4 +1,3 @@
-import type { OpenClawConfig } from "../../../config/config.js";
 import {
   getThreadBindingManager,
   type ThreadBindingRecord,
@@ -11,7 +10,6 @@ import {
 import type { OutboundIdentity } from "../../../infra/outbound/identity.js";
 import { normalizeDiscordOutboundTarget } from "../normalize/discord.js";
 import type { ChannelOutboundAdapter } from "../types.js";
-import { sendTextMediaPayload } from "./direct-text-media.js";
 
 function resolveDiscordOutboundTarget(params: {
   to: string;
@@ -39,7 +37,6 @@ function resolveDiscordWebhookIdentity(params: {
 }
 
 async function maybeSendDiscordWebhookText(params: {
-  cfg?: OpenClawConfig;
   text: string;
   threadId?: string | number | null;
   accountId?: string | null;
@@ -70,7 +67,6 @@ async function maybeSendDiscordWebhookText(params: {
     webhookToken: binding.webhookToken,
     accountId: binding.accountId,
     threadId: binding.threadId,
-    cfg: params.cfg,
     replyTo: params.replyToId ?? undefined,
     username: persona.username,
     avatarUrl: persona.avatarUrl,
@@ -84,12 +80,9 @@ export const discordOutbound: ChannelOutboundAdapter = {
   textChunkLimit: 2000,
   pollMaxOptions: 10,
   resolveTarget: ({ to }) => normalizeDiscordOutboundTarget(to),
-  sendPayload: async (ctx) =>
-    await sendTextMediaPayload({ channel: "discord", ctx, adapter: discordOutbound }),
-  sendText: async ({ cfg, to, text, accountId, deps, replyToId, threadId, identity, silent }) => {
+  sendText: async ({ to, text, accountId, deps, replyToId, threadId, identity, silent }) => {
     if (!silent) {
       const webhookResult = await maybeSendDiscordWebhookText({
-        cfg,
         text,
         threadId,
         accountId,
@@ -107,12 +100,10 @@ export const discordOutbound: ChannelOutboundAdapter = {
       replyTo: replyToId ?? undefined,
       accountId: accountId ?? undefined,
       silent: silent ?? undefined,
-      cfg,
     });
     return { channel: "discord", ...result };
   },
   sendMedia: async ({
-    cfg,
     to,
     text,
     mediaUrl,
@@ -132,16 +123,14 @@ export const discordOutbound: ChannelOutboundAdapter = {
       replyTo: replyToId ?? undefined,
       accountId: accountId ?? undefined,
       silent: silent ?? undefined,
-      cfg,
     });
     return { channel: "discord", ...result };
   },
-  sendPoll: async ({ cfg, to, poll, accountId, threadId, silent }) => {
+  sendPoll: async ({ to, poll, accountId, threadId, silent }) => {
     const target = resolveDiscordOutboundTarget({ to, threadId });
     return await sendPollDiscord(target, poll, {
       accountId: accountId ?? undefined,
       silent: silent ?? undefined,
-      cfg,
     });
   },
 };

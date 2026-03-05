@@ -71,12 +71,16 @@ export function createLineWebhookMiddleware(
         return;
       }
 
+      // Respond immediately to avoid timeout
+      res.status(200).json({ status: "ok" });
+
+      // Process events asynchronously
       if (body.events && body.events.length > 0) {
         logVerbose(`line: received ${body.events.length} webhook events`);
-        await onEvents(body);
+        await onEvents(body).catch((err) => {
+          runtime?.error?.(danger(`line webhook handler failed: ${String(err)}`));
+        });
       }
-
-      res.status(200).json({ status: "ok" });
     } catch (err) {
       runtime?.error?.(danger(`line webhook error: ${String(err)}`));
       if (!res.headersSent) {
@@ -97,17 +101,9 @@ export function startLineWebhook(options: StartLineWebhookOptions): {
   path: string;
   handler: (req: Request, res: Response, _next: NextFunction) => Promise<void>;
 } {
-  const channelSecret =
-    typeof options.channelSecret === "string" ? options.channelSecret.trim() : "";
-  if (!channelSecret) {
-    throw new Error(
-      "LINE webhook mode requires a non-empty channel secret. " +
-        "Set channels.line.channelSecret in your config.",
-    );
-  }
   const path = options.path ?? "/line/webhook";
   const middleware = createLineWebhookMiddleware({
-    channelSecret,
+    channelSecret: options.channelSecret,
     onEvents: options.onEvents,
     runtime: options.runtime,
   });

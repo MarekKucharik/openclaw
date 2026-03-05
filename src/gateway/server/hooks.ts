@@ -7,11 +7,7 @@ import type { CronJob } from "../../cron/types.js";
 import { requestHeartbeatNow } from "../../infra/heartbeat-wake.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import type { createSubsystemLogger } from "../../logging/subsystem.js";
-import {
-  normalizeHookDispatchSessionKey,
-  type HookAgentDispatchPayload,
-  type HooksConfigResolved,
-} from "../hooks.js";
+import type { HookAgentDispatchPayload, HooksConfigResolved } from "../hooks.js";
 import { createHooksRequestHandler } from "../server-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
@@ -34,10 +30,7 @@ export function createGatewayHooksRequestHandler(params: {
   };
 
   const dispatchAgentHook = (value: HookAgentDispatchPayload) => {
-    const sessionKey = normalizeHookDispatchSessionKey({
-      sessionKey: value.sessionKey,
-      targetAgentId: value.agentId,
-    });
+    const sessionKey = value.sessionKey.trim();
     const mainSessionKey = resolveMainSessionKeyFromConfig();
     const jobId = randomUUID();
     const now = Date.now();

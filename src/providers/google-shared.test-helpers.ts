@@ -1,6 +1,5 @@
 import type { Model } from "@mariozechner/pi-ai/dist/types.js";
 import { expect } from "vitest";
-import { makeZeroUsageSnapshot } from "../agents/usage.js";
 
 export const asRecord = (value: unknown): Record<string, unknown> => {
   expect(value).toBeTruthy();
@@ -49,6 +48,23 @@ export const makeGeminiCliModel = (id: string): Model<"google-gemini-cli"> =>
     maxTokens: 1,
   }) as Model<"google-gemini-cli">;
 
+function makeZeroUsage() {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0,
+    },
+  };
+}
+
 export function makeGoogleAssistantMessage(model: string, content: unknown) {
   return {
     role: "assistant",
@@ -56,7 +72,7 @@ export function makeGoogleAssistantMessage(model: string, content: unknown) {
     api: "google-generative-ai",
     provider: "google",
     model,
-    usage: makeZeroUsageSnapshot(),
+    usage: makeZeroUsage(),
     stopReason: "stop",
     timestamp: 0,
   };
@@ -69,15 +85,8 @@ export function makeGeminiCliAssistantMessage(model: string, content: unknown) {
     api: "google-gemini-cli",
     provider: "google-gemini-cli",
     model,
-    usage: makeZeroUsageSnapshot(),
+    usage: makeZeroUsage(),
     stopReason: "stop",
     timestamp: 0,
   };
-}
-
-export function expectConvertedRoles(contents: Array<{ role?: string }>, expectedRoles: string[]) {
-  expect(contents).toHaveLength(expectedRoles.length);
-  for (const [index, role] of expectedRoles.entries()) {
-    expect(contents[index]?.role).toBe(role);
-  }
 }

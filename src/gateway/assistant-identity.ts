@@ -3,7 +3,6 @@ import { resolveAgentIdentity } from "../agents/identity.js";
 import { loadAgentIdentity } from "../commands/agents.config.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { normalizeAgentId } from "../routing/session-key.js";
-import { coerceIdentityValue } from "../shared/assistant-identity-values.js";
 import {
   isAvatarHttpUrl,
   isAvatarImageDataUrl,
@@ -26,6 +25,20 @@ export type AssistantIdentity = {
   avatar: string;
   emoji?: string;
 };
+
+function coerceIdentityValue(value: string | undefined, maxLength: number): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+  return trimmed.slice(0, maxLength);
+}
 
 function isAvatarUrl(value: string): boolean {
   return isAvatarHttpUrl(value) || isAvatarImageDataUrl(value);

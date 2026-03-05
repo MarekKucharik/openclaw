@@ -115,7 +115,7 @@ describe("registerTelegramNativeCommands", () => {
     });
   });
 
-  it("truncates Telegram command registration to 100 commands", async () => {
+  it("truncates Telegram command registration to 100 commands", () => {
     const cfg: OpenClawConfig = {
       commands: { native: false },
     };
@@ -141,7 +141,10 @@ describe("registerTelegramNativeCommands", () => {
       nativeSkillsEnabled: false,
     });
 
-    const registeredCommands = await waitForRegisteredCommands(setMyCommands);
+    const registeredCommands = setMyCommands.mock.calls[0]?.[0] as Array<{
+      command: string;
+      description: string;
+    }>;
     expect(registeredCommands).toHaveLength(100);
     expect(registeredCommands).toEqual(customCommands.slice(0, 100));
     expect(runtimeLog).toHaveBeenCalledWith(

@@ -2,9 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { normalizeCompatibilityConfigValues } from "./doctor-legacy-config.js";
+import { normalizeLegacyConfigValues } from "./doctor-legacy-config.js";
 
-describe("normalizeCompatibilityConfigValues", () => {
+describe("normalizeLegacyConfigValues", () => {
   let previousOauthDir: string | undefined;
   let tempOauthDir: string | undefined;
 
@@ -15,7 +15,7 @@ describe("normalizeCompatibilityConfigValues", () => {
 
   const expectNoWhatsAppConfigForLegacyAuth = (setup?: () => void) => {
     setup?.();
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       messages: { ackReaction: "👀", ackReactionScope: "group-mentions" },
     });
     expect(res.config.channels?.whatsapp).toBeUndefined();
@@ -41,7 +41,7 @@ describe("normalizeCompatibilityConfigValues", () => {
   });
 
   it("does not add whatsapp config when missing and no auth exists", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       messages: { ackReaction: "👀" },
     });
 
@@ -50,7 +50,7 @@ describe("normalizeCompatibilityConfigValues", () => {
   });
 
   it("copies legacy ack reaction when whatsapp config exists", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       messages: { ackReaction: "👀", ackReactionScope: "group-mentions" },
       channels: { whatsapp: {} },
     });
@@ -91,7 +91,7 @@ describe("normalizeCompatibilityConfigValues", () => {
     try {
       writeCreds(customDir);
 
-      const res = normalizeCompatibilityConfigValues({
+      const res = normalizeLegacyConfigValues({
         messages: { ackReaction: "👀", ackReactionScope: "group-mentions" },
         channels: { whatsapp: { accounts: { work: { authDir: customDir } } } },
       });
@@ -107,7 +107,7 @@ describe("normalizeCompatibilityConfigValues", () => {
   });
 
   it("migrates Slack dm.policy/dm.allowFrom to dmPolicy/allowFrom aliases", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       channels: {
         slack: {
           dm: { enabled: true, policy: "open", allowFrom: ["*"] },
@@ -125,7 +125,7 @@ describe("normalizeCompatibilityConfigValues", () => {
   });
 
   it("migrates Discord account dm.policy/dm.allowFrom to dmPolicy/allowFrom aliases", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       channels: {
         discord: {
           accounts: {
@@ -147,7 +147,7 @@ describe("normalizeCompatibilityConfigValues", () => {
   });
 
   it("migrates Discord streaming boolean alias to streaming enum", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       channels: {
         discord: {
           streaming: true,
@@ -164,16 +164,14 @@ describe("normalizeCompatibilityConfigValues", () => {
     expect(res.config.channels?.discord?.streamMode).toBeUndefined();
     expect(res.config.channels?.discord?.accounts?.work?.streaming).toBe("off");
     expect(res.config.channels?.discord?.accounts?.work?.streamMode).toBeUndefined();
-    expect(res.changes).toContain(
+    expect(res.changes).toEqual([
       "Normalized channels.discord.streaming boolean → enum (partial).",
-    );
-    expect(res.changes).toContain(
       "Normalized channels.discord.accounts.work.streaming boolean → enum (off).",
-    );
+    ]);
   });
 
   it("migrates Discord legacy streamMode into streaming enum", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       channels: {
         discord: {
           streaming: false,
@@ -191,7 +189,7 @@ describe("normalizeCompatibilityConfigValues", () => {
   });
 
   it("migrates Telegram streamMode into streaming enum", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       channels: {
         telegram: {
           streamMode: "block",
@@ -207,7 +205,7 @@ describe("normalizeCompatibilityConfigValues", () => {
   });
 
   it("migrates Slack legacy streaming keys to unified config", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       channels: {
         slack: {
           streaming: false,
@@ -225,46 +223,8 @@ describe("normalizeCompatibilityConfigValues", () => {
     ]);
   });
 
-  it("moves missing default account from single-account top-level config when named accounts already exist", () => {
-    const res = normalizeCompatibilityConfigValues({
-      channels: {
-        telegram: {
-          enabled: true,
-          botToken: "legacy-token",
-          dmPolicy: "allowlist",
-          allowFrom: ["123"],
-          groupPolicy: "allowlist",
-          streaming: "partial",
-          accounts: {
-            alerts: {
-              enabled: true,
-              botToken: "alerts-token",
-            },
-          },
-        },
-      },
-    });
-
-    expect(res.config.channels?.telegram?.accounts?.default).toEqual({
-      botToken: "legacy-token",
-      dmPolicy: "allowlist",
-      allowFrom: ["123"],
-      groupPolicy: "allowlist",
-      streaming: "partial",
-    });
-    expect(res.config.channels?.telegram?.botToken).toBeUndefined();
-    expect(res.config.channels?.telegram?.dmPolicy).toBeUndefined();
-    expect(res.config.channels?.telegram?.allowFrom).toBeUndefined();
-    expect(res.config.channels?.telegram?.groupPolicy).toBeUndefined();
-    expect(res.config.channels?.telegram?.streaming).toBeUndefined();
-    expect(res.config.channels?.telegram?.accounts?.alerts?.botToken).toBe("alerts-token");
-    expect(res.changes).toContain(
-      "Moved channels.telegram single-account top-level values into channels.telegram.accounts.default.",
-    );
-  });
-
   it("migrates browser ssrfPolicy allowPrivateNetwork to dangerouslyAllowPrivateNetwork", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       browser: {
         ssrfPolicy: {
           allowPrivateNetwork: true,
@@ -282,7 +242,7 @@ describe("normalizeCompatibilityConfigValues", () => {
   });
 
   it("normalizes conflicting browser SSRF alias keys without changing effective behavior", () => {
-    const res = normalizeCompatibilityConfigValues({
+    const res = normalizeLegacyConfigValues({
       browser: {
         ssrfPolicy: {
           allowPrivateNetwork: true,

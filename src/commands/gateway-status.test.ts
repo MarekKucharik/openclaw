@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RuntimeEnv } from "../runtime.js";
 import { withEnvAsync } from "../test-utils/env.js";
 
 const loadConfig = vi.fn(() => ({
@@ -135,33 +134,15 @@ function createRuntimeCapture() {
   return { runtime, runtimeLogs, runtimeErrors };
 }
 
-function asRuntimeEnv(runtime: ReturnType<typeof createRuntimeCapture>["runtime"]): RuntimeEnv {
-  return runtime as unknown as RuntimeEnv;
-}
-
-function makeRemoteGatewayConfig(url: string, token = "rtok", localToken = "ltok") {
-  return {
-    gateway: {
-      mode: "remote",
-      remote: { url, token },
-      auth: { token: localToken },
-    },
-  };
-}
-
-async function runGatewayStatus(
-  runtime: ReturnType<typeof createRuntimeCapture>["runtime"],
-  opts: { timeout: string; json?: boolean; ssh?: string; sshAuto?: boolean; sshIdentity?: string },
-) {
-  const { gatewayStatusCommand } = await import("./gateway-status.js");
-  await gatewayStatusCommand(opts, asRuntimeEnv(runtime));
-}
-
 describe("gateway-status command", () => {
   it("prints human output by default", async () => {
     const { runtime, runtimeLogs, runtimeErrors } = createRuntimeCapture();
 
-    await runGatewayStatus(runtime, { timeout: "1000" });
+    const { gatewayStatusCommand } = await import("./gateway-status.js");
+    await gatewayStatusCommand(
+      { timeout: "1000" },
+      runtime as unknown as import("../runtime.js").RuntimeEnv,
+    );
 
     expect(runtimeErrors).toHaveLength(0);
     expect(runtimeLogs.join("\n")).toContain("Gateway Status");
@@ -172,7 +153,11 @@ describe("gateway-status command", () => {
   it("prints a structured JSON envelope when --json is set", async () => {
     const { runtime, runtimeLogs, runtimeErrors } = createRuntimeCapture();
 
-    await runGatewayStatus(runtime, { timeout: "1000", json: true });
+    const { gatewayStatusCommand } = await import("./gateway-status.js");
+    await gatewayStatusCommand(
+      { timeout: "1000", json: true },
+      runtime as unknown as import("../runtime.js").RuntimeEnv,
+    );
 
     expect(runtimeErrors).toHaveLength(0);
     const parsed = JSON.parse(runtimeLogs.join("\n")) as Record<string, unknown>;
@@ -191,7 +176,11 @@ describe("gateway-status command", () => {
     sshStop.mockClear();
     probeGateway.mockClear();
 
-    await runGatewayStatus(runtime, { timeout: "1000", json: true, ssh: "me@studio" });
+    const { gatewayStatusCommand } = await import("./gateway-status.js");
+    await gatewayStatusCommand(
+      { timeout: "1000", json: true, ssh: "me@studio" },
+      runtime as unknown as import("../runtime.js").RuntimeEnv,
+    );
 
     expect(startSshPortForward).toHaveBeenCalledTimes(1);
     expect(probeGateway).toHaveBeenCalled();
@@ -209,14 +198,24 @@ describe("gateway-status command", () => {
   it("skips invalid ssh-auto discovery targets", async () => {
     const { runtime } = createRuntimeCapture();
     await withEnvAsync({ USER: "steipete" }, async () => {
-      loadConfig.mockReturnValueOnce(makeRemoteGatewayConfig("", "", "ltok"));
+      loadConfig.mockReturnValueOnce({
+        gateway: {
+          mode: "remote",
+          remote: { url: "", token: "" },
+          auth: { token: "ltok" },
+        },
+      });
       discoverGatewayBeacons.mockResolvedValueOnce([
         { tailnetDns: "-V" },
         { tailnetDns: "goodhost" },
       ]);
 
       startSshPortForward.mockClear();
-      await runGatewayStatus(runtime, { timeout: "1000", json: true, sshAuto: true });
+      const { gatewayStatusCommand } = await import("./gateway-status.js");
+      await gatewayStatusCommand(
+        { timeout: "1000", json: true, sshAuto: true },
+        runtime as unknown as import("../runtime.js").RuntimeEnv,
+      );
 
       expect(startSshPortForward).toHaveBeenCalledTimes(1);
       const call = startSshPortForward.mock.calls[0]?.[0] as { target: string };
@@ -227,9 +226,13 @@ describe("gateway-status command", () => {
   it("infers SSH target from gateway.remote.url and ssh config", async () => {
     const { runtime } = createRuntimeCapture();
     await withEnvAsync({ USER: "steipete" }, async () => {
-      loadConfig.mockReturnValueOnce(
-        makeRemoteGatewayConfig("ws://peters-mac-studio-1.sheep-coho.ts.net:18789"),
-      );
+      loadConfig.mockReturnValueOnce({
+        gateway: {
+          mode: "remote",
+          remote: { url: "ws://peters-mac-studio-1.sheep-coho.ts.net:18789", token: "rtok" },
+          auth: { token: "ltok" },
+        },
+      });
       resolveSshConfig.mockResolvedValueOnce({
         user: "steipete",
         host: "peters-mac-studio-1.sheep-coho.ts.net",
@@ -238,7 +241,11 @@ describe("gateway-status command", () => {
       });
 
       startSshPortForward.mockClear();
-      await runGatewayStatus(runtime, { timeout: "1000", json: true });
+      const { gatewayStatusCommand } = await import("./gateway-status.js");
+      await gatewayStatusCommand(
+        { timeout: "1000", json: true },
+        runtime as unknown as import("../runtime.js").RuntimeEnv,
+      );
 
       expect(startSshPortForward).toHaveBeenCalledTimes(1);
       const call = startSshPortForward.mock.calls[0]?.[0] as {
@@ -253,11 +260,21 @@ describe("gateway-status command", () => {
   it("falls back to host-only when USER is missing and ssh config is unavailable", async () => {
     const { runtime } = createRuntimeCapture();
     await withEnvAsync({ USER: "" }, async () => {
-      loadConfig.mockReturnValueOnce(makeRemoteGatewayConfig("wss://studio.example:18789"));
+      loadConfig.mockReturnValueOnce({
+        gateway: {
+          mode: "remote",
+          remote: { url: "wss://studio.example:18789", token: "rtok" },
+          auth: { token: "ltok" },
+        },
+      });
       resolveSshConfig.mockResolvedValueOnce(null);
 
       startSshPortForward.mockClear();
-      await runGatewayStatus(runtime, { timeout: "1000", json: true });
+      const { gatewayStatusCommand } = await import("./gateway-status.js");
+      await gatewayStatusCommand(
+        { timeout: "1000", json: true },
+        runtime as unknown as import("../runtime.js").RuntimeEnv,
+      );
 
       const call = startSshPortForward.mock.calls[0]?.[0] as {
         target: string;
@@ -269,7 +286,13 @@ describe("gateway-status command", () => {
   it("keeps explicit SSH identity even when ssh config provides one", async () => {
     const { runtime } = createRuntimeCapture();
 
-    loadConfig.mockReturnValueOnce(makeRemoteGatewayConfig("wss://studio.example:18789"));
+    loadConfig.mockReturnValueOnce({
+      gateway: {
+        mode: "remote",
+        remote: { url: "wss://studio.example:18789", token: "rtok" },
+        auth: { token: "ltok" },
+      },
+    });
     resolveSshConfig.mockResolvedValueOnce({
       user: "me",
       host: "studio.example",
@@ -278,11 +301,11 @@ describe("gateway-status command", () => {
     });
 
     startSshPortForward.mockClear();
-    await runGatewayStatus(runtime, {
-      timeout: "1000",
-      json: true,
-      sshIdentity: "/tmp/explicit_id",
-    });
+    const { gatewayStatusCommand } = await import("./gateway-status.js");
+    await gatewayStatusCommand(
+      { timeout: "1000", json: true, sshIdentity: "/tmp/explicit_id" },
+      runtime as unknown as import("../runtime.js").RuntimeEnv,
+    );
 
     const call = startSshPortForward.mock.calls[0]?.[0] as {
       identity?: string;

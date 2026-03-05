@@ -61,28 +61,6 @@ function makeProcessMessageArgs(params: {
   } as any;
 }
 
-function createWhatsAppDirectStreamingArgs(params?: {
-  rememberSentText?: (text: string | undefined, opts: unknown) => void;
-}) {
-  return makeProcessMessageArgs({
-    routeSessionKey: "agent:main:whatsapp:direct:+1555",
-    groupHistoryKey: "+1555",
-    rememberSentText: params?.rememberSentText,
-    cfg: {
-      channels: { whatsapp: { blockStreaming: true } },
-      messages: {},
-      session: { store: sessionStorePath },
-    } as unknown as ReturnType<typeof import("../../../config/config.js").loadConfig>,
-    msg: {
-      id: "msg1",
-      from: "+1555",
-      to: "+2000",
-      chatType: "direct",
-      body: "hi",
-    },
-  });
-}
-
 vi.mock("../../../auto-reply/reply/provider-dispatcher.js", () => ({
   // oxlint-disable-next-line typescript/no-explicit-any
   dispatchReplyWithBufferedBlockDispatcher: vi.fn(async (params: any) => {
@@ -265,7 +243,25 @@ describe("web processMessage inbound contract", () => {
 
   it("suppresses non-final WhatsApp payload delivery", async () => {
     const rememberSentText = vi.fn();
-    await processMessage(createWhatsAppDirectStreamingArgs({ rememberSentText }));
+    await processMessage(
+      makeProcessMessageArgs({
+        routeSessionKey: "agent:main:whatsapp:direct:+1555",
+        groupHistoryKey: "+1555",
+        rememberSentText,
+        cfg: {
+          channels: { whatsapp: { blockStreaming: true } },
+          messages: {},
+          session: { store: sessionStorePath },
+        } as unknown as ReturnType<typeof import("../../../config/config.js").loadConfig>,
+        msg: {
+          id: "msg1",
+          from: "+1555",
+          to: "+2000",
+          chatType: "direct",
+          body: "hi",
+        },
+      }),
+    );
 
     // oxlint-disable-next-line typescript/no-explicit-any
     const deliver = (capturedDispatchParams as any)?.dispatcherOptions?.deliver as
@@ -284,7 +280,24 @@ describe("web processMessage inbound contract", () => {
   });
 
   it("forces disableBlockStreaming for WhatsApp dispatch", async () => {
-    await processMessage(createWhatsAppDirectStreamingArgs());
+    await processMessage(
+      makeProcessMessageArgs({
+        routeSessionKey: "agent:main:whatsapp:direct:+1555",
+        groupHistoryKey: "+1555",
+        cfg: {
+          channels: { whatsapp: { blockStreaming: true } },
+          messages: {},
+          session: { store: sessionStorePath },
+        } as unknown as ReturnType<typeof import("../../../config/config.js").loadConfig>,
+        msg: {
+          id: "msg1",
+          from: "+1555",
+          to: "+2000",
+          chatType: "direct",
+          body: "hi",
+        },
+      }),
+    );
 
     // oxlint-disable-next-line typescript/no-explicit-any
     const replyOptions = (capturedDispatchParams as any)?.replyOptions;
@@ -343,77 +356,5 @@ describe("web processMessage inbound contract", () => {
     await processMessage(args);
 
     expect(updateLastRouteMock).not.toHaveBeenCalled();
-  });
-
-  it("does not update main last route for non-owner sender when main DM scope is pinned", async () => {
-    const updateLastRouteMock = vi.mocked(updateLastRouteInBackground);
-    updateLastRouteMock.mockClear();
-
-    const args = makeProcessMessageArgs({
-      routeSessionKey: "agent:main:main",
-      groupHistoryKey: "+3000",
-      cfg: {
-        channels: {
-          whatsapp: {
-            allowFrom: ["+1000"],
-          },
-        },
-        messages: {},
-        session: { store: sessionStorePath, dmScope: "main" },
-      } as unknown as ReturnType<typeof import("../../../config/config.js").loadConfig>,
-      msg: {
-        id: "msg-last-route-3",
-        from: "+3000",
-        to: "+2000",
-        chatType: "direct",
-        body: "hello",
-        senderE164: "+3000",
-      },
-    });
-    args.route = {
-      ...args.route,
-      sessionKey: "agent:main:main",
-      mainSessionKey: "agent:main:main",
-    };
-
-    await processMessage(args);
-
-    expect(updateLastRouteMock).not.toHaveBeenCalled();
-  });
-
-  it("updates main last route for owner sender when main DM scope is pinned", async () => {
-    const updateLastRouteMock = vi.mocked(updateLastRouteInBackground);
-    updateLastRouteMock.mockClear();
-
-    const args = makeProcessMessageArgs({
-      routeSessionKey: "agent:main:main",
-      groupHistoryKey: "+1000",
-      cfg: {
-        channels: {
-          whatsapp: {
-            allowFrom: ["+1000"],
-          },
-        },
-        messages: {},
-        session: { store: sessionStorePath, dmScope: "main" },
-      } as unknown as ReturnType<typeof import("../../../config/config.js").loadConfig>,
-      msg: {
-        id: "msg-last-route-4",
-        from: "+1000",
-        to: "+2000",
-        chatType: "direct",
-        body: "hello",
-        senderE164: "+1000",
-      },
-    });
-    args.route = {
-      ...args.route,
-      sessionKey: "agent:main:main",
-      mainSessionKey: "agent:main:main",
-    };
-
-    await processMessage(args);
-
-    expect(updateLastRouteMock).toHaveBeenCalledTimes(1);
   });
 });

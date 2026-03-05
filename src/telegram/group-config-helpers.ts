@@ -1,12 +1,8 @@
-import type {
-  TelegramDirectConfig,
-  TelegramGroupConfig,
-  TelegramTopicConfig,
-} from "../config/types.js";
+import type { TelegramGroupConfig, TelegramTopicConfig } from "../config/types.js";
 import { firstDefined } from "./bot-access.js";
 
 export function resolveTelegramGroupPromptSettings(params: {
-  groupConfig?: TelegramGroupConfig | TelegramDirectConfig;
+  groupConfig?: TelegramGroupConfig;
   topicConfig?: TelegramTopicConfig;
 }): {
   skillFilter: string[] | undefined;

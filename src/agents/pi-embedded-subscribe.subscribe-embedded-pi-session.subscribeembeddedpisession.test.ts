@@ -11,6 +11,10 @@ import {
 } from "./pi-embedded-subscribe.e2e-harness.js";
 import { subscribeEmbeddedPiSession } from "./pi-embedded-subscribe.js";
 
+type StubSession = {
+  subscribe: (fn: (evt: unknown) => void) => () => void;
+};
+
 describe("subscribeEmbeddedPiSession", () => {
   function createAgentEventHarness(options?: { runId?: string; sessionKey?: string }) {
     const { session, emit } = createStubSessionHarness();
@@ -35,32 +39,6 @@ describe("subscribeEmbeddedPiSession", () => {
     });
 
     return { emit, subscription };
-  }
-
-  function createSubscribedHarness(
-    options: Omit<Parameters<typeof subscribeEmbeddedPiSession>[0], "session">,
-  ) {
-    const { session, emit } = createStubSessionHarness();
-    subscribeEmbeddedPiSession({
-      session,
-      ...options,
-    });
-    return { emit };
-  }
-
-  function emitAssistantTextDelta(
-    emit: (evt: unknown) => void,
-    delta: string,
-    message: Record<string, unknown> = { role: "assistant" },
-  ) {
-    emit({
-      type: "message_update",
-      message,
-      assistantMessageEvent: {
-        type: "text_delta",
-        delta,
-      },
-    });
   }
 
   function createWriteFailureHarness(params: {
@@ -107,10 +85,19 @@ describe("subscribeEmbeddedPiSession", () => {
   it.each(THINKING_TAG_CASES)(
     "streams <%s> reasoning via onReasoningStream without leaking into final text",
     ({ open, close }) => {
+      let handler: ((evt: unknown) => void) | undefined;
+      const session: StubSession = {
+        subscribe: (fn) => {
+          handler = fn;
+          return () => {};
+        },
+      };
+
       const onReasoningStream = vi.fn();
       const onBlockReply = vi.fn();
 
-      const { emit } = createSubscribedHarness({
+      subscribeEmbeddedPiSession({
+        session: session as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"],
         runId: "run",
         onReasoningStream,
         onBlockReply,
@@ -118,8 +105,23 @@ describe("subscribeEmbeddedPiSession", () => {
         reasoningMode: "stream",
       });
 
-      emitAssistantTextDelta(emit, `${open}\nBecause`);
-      emitAssistantTextDelta(emit, ` it helps\n${close}\n\nFinal answer`);
+      handler?.({
+        type: "message_update",
+        message: { role: "assistant" },
+        assistantMessageEvent: {
+          type: "text_delta",
+          delta: `${open}\nBecause`,
+        },
+      });
+
+      handler?.({
+        type: "message_update",
+        message: { role: "assistant" },
+        assistantMessageEvent: {
+          type: "text_delta",
+          delta: ` it helps\n${close}\n\nFinal answer`,
+        },
+      });
 
       const assistantMessage = {
         role: "assistant",
@@ -131,7 +133,7 @@ describe("subscribeEmbeddedPiSession", () => {
         ],
       } as AssistantMessage;
 
-      emit({ type: "message_end", message: assistantMessage });
+      handler?.({ type: "message_end", message: assistantMessage });
 
       expect(onBlockReply).toHaveBeenCalledTimes(1);
       expect(onBlockReply.mock.calls[0][0].text).toBe("Final answer");
@@ -150,9 +152,18 @@ describe("subscribeEmbeddedPiSession", () => {
   it.each(THINKING_TAG_CASES)(
     "suppresses <%s> blocks across chunk boundaries",
     ({ open, close }) => {
+      let handler: ((evt: unknown) => void) | undefined;
+      const session: StubSession = {
+        subscribe: (fn) => {
+          handler = fn;
+          return () => {};
+        },
+      };
+
       const onBlockReply = vi.fn();
 
-      const { emit } = createSubscribedHarness({
+      subscribeEmbeddedPiSession({
+        session: session as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"],
         runId: "run",
         onBlockReply,
         blockReplyBreak: "text_end",
@@ -163,13 +174,29 @@ describe("subscribeEmbeddedPiSession", () => {
         },
       });
 
-      emit({ type: "message_start", message: { role: "assistant" } });
-      emitAssistantTextDelta(emit, `${open}Reasoning chunk that should not leak`);
+      handler?.({ type: "message_start", message: { role: "assistant" } });
+
+      handler?.({
+        type: "message_update",
+        message: { role: "assistant" },
+        assistantMessageEvent: {
+          type: "text_delta",
+          delta: `${open}Reasoning chunk that should not leak`,
+        },
+      });
 
       expect(onBlockReply).not.toHaveBeenCalled();
 
-      emitAssistantTextDelta(emit, `${close}\n\nFinal answer`);
-      emit({
+      handler?.({
+        type: "message_update",
+        message: { role: "assistant" },
+        assistantMessageEvent: {
+          type: "text_delta",
+          delta: `${close}\n\nFinal answer`,
+        },
+      });
+
+      handler?.({
         type: "message_update",
         message: { role: "assistant" },
         assistantMessageEvent: { type: "text_end" },
@@ -189,17 +216,26 @@ describe("subscribeEmbeddedPiSession", () => {
   );
 
   it("streams native thinking_delta events and signals reasoning end", () => {
+    let handler: ((evt: unknown) => void) | undefined;
+    const session: StubSession = {
+      subscribe: (fn) => {
+        handler = fn;
+        return () => {};
+      },
+    };
+
     const onReasoningStream = vi.fn();
     const onReasoningEnd = vi.fn();
 
-    const { emit } = createSubscribedHarness({
+    subscribeEmbeddedPiSession({
+      session: session as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"],
       runId: "run",
       reasoningMode: "stream",
       onReasoningStream,
       onReasoningEnd,
     });
 
-    emit({
+    handler?.({
       type: "message_update",
       message: {
         role: "assistant",
@@ -211,7 +247,7 @@ describe("subscribeEmbeddedPiSession", () => {
       },
     });
 
-    emit({
+    handler?.({
       type: "message_update",
       message: {
         role: "assistant",
@@ -230,18 +266,36 @@ describe("subscribeEmbeddedPiSession", () => {
   });
 
   it("emits reasoning end once when native and tagged reasoning end overlap", () => {
+    let handler: ((evt: unknown) => void) | undefined;
+    const session: StubSession = {
+      subscribe: (fn) => {
+        handler = fn;
+        return () => {};
+      },
+    };
+
     const onReasoningEnd = vi.fn();
 
-    const { emit } = createSubscribedHarness({
+    subscribeEmbeddedPiSession({
+      session: session as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"],
       runId: "run",
       reasoningMode: "stream",
       onReasoningStream: vi.fn(),
       onReasoningEnd,
     });
 
-    emit({ type: "message_start", message: { role: "assistant" } });
-    emitAssistantTextDelta(emit, "<think>Checking");
-    emit({
+    handler?.({ type: "message_start", message: { role: "assistant" } });
+
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: "<think>Checking",
+      },
+    });
+
+    handler?.({
       type: "message_update",
       message: {
         role: "assistant",
@@ -252,7 +306,14 @@ describe("subscribeEmbeddedPiSession", () => {
       },
     });
 
-    emitAssistantTextDelta(emit, " files</think>\nFinal answer");
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: " files</think>\nFinal answer",
+      },
+    });
 
     expect(onReasoningEnd).toHaveBeenCalledTimes(1);
   });
@@ -313,8 +374,16 @@ describe("subscribeEmbeddedPiSession", () => {
     const { emit, onAgentEvent } = createAgentEventHarness();
 
     emit({ type: "message_start", message: { role: "assistant" } });
-    emitAssistantTextDelta(emit, "MEDIA:");
-    emitAssistantTextDelta(emit, " https://example.com/a.png\nCaption");
+    emit({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "text_delta", delta: "MEDIA:" },
+    });
+    emit({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "text_delta", delta: " https://example.com/a.png\nCaption" },
+    });
 
     const payloads = extractAgentEventPayloads(onAgentEvent.mock.calls);
     expect(payloads).toHaveLength(1);
@@ -325,7 +394,11 @@ describe("subscribeEmbeddedPiSession", () => {
     const { emit, onAgentEvent } = createAgentEventHarness();
 
     emit({ type: "message_start", message: { role: "assistant" } });
-    emitAssistantTextDelta(emit, "MEDIA: https://example.com/a.png");
+    emit({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "text_delta", delta: "MEDIA: https://example.com/a.png" },
+    });
 
     const payloads = extractAgentEventPayloads(onAgentEvent.mock.calls);
     expect(payloads).toHaveLength(1);

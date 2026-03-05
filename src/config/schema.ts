@@ -297,43 +297,6 @@ function applyChannelSchemas(schema: ConfigSchema, channels: ChannelUiMetadata[]
 }
 
 let cachedBase: ConfigSchemaResponse | null = null;
-const mergedSchemaCache = new Map<string, ConfigSchemaResponse>();
-const MERGED_SCHEMA_CACHE_MAX = 64;
-
-function buildMergedSchemaCacheKey(params: {
-  plugins: PluginUiMetadata[];
-  channels: ChannelUiMetadata[];
-}): string {
-  const plugins = params.plugins
-    .map((plugin) => ({
-      id: plugin.id,
-      name: plugin.name,
-      description: plugin.description,
-      configSchema: plugin.configSchema ?? null,
-      configUiHints: plugin.configUiHints ?? null,
-    }))
-    .toSorted((a, b) => a.id.localeCompare(b.id));
-  const channels = params.channels
-    .map((channel) => ({
-      id: channel.id,
-      label: channel.label,
-      description: channel.description,
-      configSchema: channel.configSchema ?? null,
-      configUiHints: channel.configUiHints ?? null,
-    }))
-    .toSorted((a, b) => a.id.localeCompare(b.id));
-  return JSON.stringify({ plugins, channels });
-}
-
-function setMergedSchemaCache(key: string, value: ConfigSchemaResponse): void {
-  if (mergedSchemaCache.size >= MERGED_SCHEMA_CACHE_MAX) {
-    const oldest = mergedSchemaCache.keys().next();
-    if (!oldest.done) {
-      mergedSchemaCache.delete(oldest.value);
-    }
-  }
-  mergedSchemaCache.set(key, value);
-}
 
 function stripChannelSchema(schema: ConfigSchema): ConfigSchema {
   const next = cloneSchema(schema);
@@ -386,11 +349,6 @@ export function buildConfigSchema(params?: {
   if (plugins.length === 0 && channels.length === 0) {
     return base;
   }
-  const cacheKey = buildMergedSchemaCacheKey({ plugins, channels });
-  const cached = mergedSchemaCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
   const mergedWithoutSensitiveHints = applyHeartbeatTargetHints(
     applyChannelHints(applyPluginHints(base.uiHints, plugins), channels),
     channels,
@@ -404,11 +362,9 @@ export function buildConfigSchema(params?: {
     applySensitiveHints(mergedWithoutSensitiveHints, extensionHintKeys),
   );
   const mergedSchema = applyChannelSchemas(applyPluginSchemas(base.schema, plugins), channels);
-  const merged = {
+  return {
     ...base,
     schema: mergedSchema,
     uiHints: mergedHints,
   };
-  setMergedSchemaCache(cacheKey, merged);
-  return merged;
 }

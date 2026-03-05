@@ -34,38 +34,6 @@ export type NormalizedUsage = {
   total?: number;
 };
 
-export type AssistantUsageSnapshot = {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  totalTokens: number;
-  cost: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-    total: number;
-  };
-};
-
-export function makeZeroUsageSnapshot(): AssistantUsageSnapshot {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 0,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: 0,
-    },
-  };
-}
-
 const asFiniteNumber = (value: unknown): number | undefined => {
   if (typeof value !== "number") {
     return undefined;
@@ -90,13 +58,9 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
     return undefined;
   }
 
-  // Some providers (pi-ai OpenAI-format) pre-subtract cached_tokens from
-  // prompt_tokens upstream.  When cached_tokens > prompt_tokens the result is
-  // negative, which is nonsensical.  Clamp to 0.
-  const rawInput = asFiniteNumber(
+  const input = asFiniteNumber(
     raw.input ?? raw.inputTokens ?? raw.input_tokens ?? raw.promptTokens ?? raw.prompt_tokens,
   );
-  const input = rawInput !== undefined && rawInput < 0 ? 0 : rawInput;
   const output = asFiniteNumber(
     raw.output ??
       raw.outputTokens ??
@@ -153,7 +117,6 @@ export function derivePromptTokens(usage?: {
 export function deriveSessionTotalTokens(params: {
   usage?: {
     input?: number;
-    output?: number;
     total?: number;
     cacheRead?: number;
     cacheWrite?: number;
@@ -164,14 +127,11 @@ export function deriveSessionTotalTokens(params: {
   const promptOverride = params.promptTokens;
   const hasPromptOverride =
     typeof promptOverride === "number" && Number.isFinite(promptOverride) && promptOverride > 0;
-
   const usage = params.usage;
   if (!usage && !hasPromptOverride) {
     return undefined;
   }
-
-  // NOTE: SessionEntry.totalTokens is used as a prompt/context snapshot.
-  // It intentionally excludes completion/output tokens.
+  const input = usage?.input ?? 0;
   const promptTokens = hasPromptOverride
     ? promptOverride
     : derivePromptTokens({
@@ -179,12 +139,15 @@ export function deriveSessionTotalTokens(params: {
         cacheRead: usage?.cacheRead,
         cacheWrite: usage?.cacheWrite,
       });
-
-  if (!(typeof promptTokens === "number") || !Number.isFinite(promptTokens) || promptTokens <= 0) {
+  let total = promptTokens ?? usage?.total ?? input;
+  if (!(total > 0)) {
     return undefined;
   }
 
-  // Keep this value unclamped; display layers are responsible for capping
-  // percentages for terminal output.
-  return promptTokens;
+  // NOTE: Do NOT clamp total to contextTokens here. The stored totalTokens
+  // should reflect the actual token count (or best estimate). Clamping causes
+  // /status to display contextTokens/contextTokens (100%) when the accumulated
+  // input exceeds the context window, hiding the real usage. The display layer
+  // (formatTokens in status.ts) already caps the percentage at 999%.
+  return total;
 }

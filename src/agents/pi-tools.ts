@@ -1,4 +1,10 @@
-import { codingTools, createReadTool, readTool } from "@mariozechner/pi-coding-agent";
+import {
+  codingTools,
+  createEditTool,
+  createReadTool,
+  createWriteTool,
+  readTool,
+} from "@mariozechner/pi-coding-agent";
 import type { OpenClawConfig } from "../config/config.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
@@ -28,8 +34,7 @@ import {
 } from "./pi-tools.policy.js";
 import {
   assertRequiredParams,
-  createHostWorkspaceEditTool,
-  createHostWorkspaceWriteTool,
+  CLAUDE_PARAM_GROUPS,
   createOpenClawReadTool,
   createSandboxedEditTool,
   createSandboxedReadTool,
@@ -188,10 +193,6 @@ export function createOpenClawCodingTools(options?: {
   messageThreadId?: string | number;
   sandbox?: SandboxContext | null;
   sessionKey?: string;
-  /** Ephemeral session UUID — regenerated on /new and /reset. */
-  sessionId?: string;
-  /** Stable run identifier for this agent invocation. */
-  runId?: string;
   agentDir?: string;
   workspaceDir?: string;
   config?: OpenClawConfig;
@@ -216,6 +217,7 @@ export function createOpenClawCodingTools(options?: {
   currentThreadTs?: string;
   /** Current inbound message id for action fallbacks (e.g. Telegram react). */
   currentMessageId?: string | number;
+  currentMessageSenderId?: string;
   /** Group id for channel-level tool policy resolution. */
   groupId?: string | null;
   /** Group channel label (e.g. #general) for channel-level tool policy resolution. */
@@ -363,14 +365,22 @@ export function createOpenClawCodingTools(options?: {
       if (sandboxRoot) {
         return [];
       }
-      const wrapped = createHostWorkspaceWriteTool(workspaceRoot, { workspaceOnly });
+      // Wrap with param normalization for Claude Code compatibility
+      const wrapped = wrapToolParamNormalization(
+        createWriteTool(workspaceRoot),
+        CLAUDE_PARAM_GROUPS.write,
+      );
       return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
     }
     if (tool.name === "edit") {
       if (sandboxRoot) {
         return [];
       }
-      const wrapped = createHostWorkspaceEditTool(workspaceRoot, { workspaceOnly });
+      // Wrap with param normalization for Claude Code compatibility
+      const wrapped = wrapToolParamNormalization(
+        createEditTool(workspaceRoot),
+        CLAUDE_PARAM_GROUPS.edit,
+      );
       return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
     }
     return [tool];
@@ -392,9 +402,6 @@ export function createOpenClawCodingTools(options?: {
     scopeKey,
     sessionKey: options?.sessionKey,
     messageProvider: options?.messageProvider,
-    currentChannelId: options?.currentChannelId,
-    currentThreadTs: options?.currentThreadTs,
-    accountId: options?.agentAccountId,
     backgroundMs: options?.exec?.backgroundMs ?? execConfig.backgroundMs,
     timeoutSec: options?.exec?.timeoutSec ?? execConfig.timeoutSec,
     approvalRunningNoticeMs:
@@ -489,15 +496,15 @@ export function createOpenClawCodingTools(options?: {
       currentChannelId: options?.currentChannelId,
       currentThreadTs: options?.currentThreadTs,
       currentMessageId: options?.currentMessageId,
+      currentMessageSenderId: options?.currentMessageSenderId,
       replyToMode: options?.replyToMode,
       hasRepliedRef: options?.hasRepliedRef,
       modelHasVision: options?.modelHasVision,
       requireExplicitMessageTarget: options?.requireExplicitMessageTarget,
       disableMessageTool: options?.disableMessageTool,
       requesterAgentIdOverride: agentId,
-      requesterSenderId: options?.senderId,
+      requesterSenderId: options?.senderE164 ?? options?.senderId,
       senderIsOwner: options?.senderIsOwner,
-      sessionId: options?.sessionId,
     }),
   ];
   const toolsForMessageProvider = applyMessageProviderToolPolicy(tools, options?.messageProvider);
@@ -529,17 +536,12 @@ export function createOpenClawCodingTools(options?: {
   // Without this, some providers (notably OpenAI) will reject root-level union schemas.
   // Provider-specific cleaning: Gemini needs constraint keywords stripped, but Anthropic expects them.
   const normalized = subagentFiltered.map((tool) =>
-    normalizeToolParameters(tool, {
-      modelProvider: options?.modelProvider,
-      modelId: options?.modelId,
-    }),
+    normalizeToolParameters(tool, { modelProvider: options?.modelProvider }),
   );
   const withHooks = normalized.map((tool) =>
     wrapToolWithBeforeToolCallHook(tool, {
       agentId,
       sessionKey: options?.sessionKey,
-      sessionId: options?.sessionId,
-      runId: options?.runId,
       loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
     }),
   );

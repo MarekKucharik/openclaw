@@ -6,10 +6,6 @@ const VALID_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 const INVALID_CHARS_RE = /[^a-z0-9_-]+/g;
 const LEADING_DASH_RE = /^-+/;
 const TRAILING_DASH_RE = /-+$/;
-const ACCOUNT_ID_CACHE_MAX = 512;
-
-const normalizeAccountIdCache = new Map<string, string>();
-const normalizeOptionalAccountIdCache = new Map<string, string | undefined>();
 
 function canonicalizeAccountId(value: string): string {
   if (VALID_ID_RE.test(value)) {
@@ -36,13 +32,7 @@ export function normalizeAccountId(value: string | undefined | null): string {
   if (!trimmed) {
     return DEFAULT_ACCOUNT_ID;
   }
-  const cached = normalizeAccountIdCache.get(trimmed);
-  if (cached) {
-    return cached;
-  }
-  const normalized = normalizeCanonicalAccountId(trimmed) || DEFAULT_ACCOUNT_ID;
-  setNormalizeCache(normalizeAccountIdCache, trimmed, normalized);
-  return normalized;
+  return normalizeCanonicalAccountId(trimmed) || DEFAULT_ACCOUNT_ID;
 }
 
 export function normalizeOptionalAccountId(value: string | undefined | null): string | undefined {
@@ -50,21 +40,5 @@ export function normalizeOptionalAccountId(value: string | undefined | null): st
   if (!trimmed) {
     return undefined;
   }
-  if (normalizeOptionalAccountIdCache.has(trimmed)) {
-    return normalizeOptionalAccountIdCache.get(trimmed);
-  }
-  const normalized = normalizeCanonicalAccountId(trimmed) || undefined;
-  setNormalizeCache(normalizeOptionalAccountIdCache, trimmed, normalized);
-  return normalized;
-}
-
-function setNormalizeCache<T>(cache: Map<string, T>, key: string, value: T): void {
-  cache.set(key, value);
-  if (cache.size <= ACCOUNT_ID_CACHE_MAX) {
-    return;
-  }
-  const oldest = cache.keys().next();
-  if (!oldest.done) {
-    cache.delete(oldest.value);
-  }
+  return normalizeCanonicalAccountId(trimmed) || undefined;
 }

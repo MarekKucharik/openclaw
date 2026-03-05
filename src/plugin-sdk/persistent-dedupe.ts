@@ -22,7 +22,6 @@ export type PersistentDedupeCheckOptions = {
 
 export type PersistentDedupe = {
   checkAndRecord: (key: string, options?: PersistentDedupeCheckOptions) => Promise<boolean>;
-  warmup: (namespace?: string, onError?: (error: unknown) => void) => Promise<number>;
   clearMemory: () => void;
   memorySize: () => number;
 };
@@ -128,30 +127,7 @@ export function createPersistentDedupe(options: PersistentDedupeOptions): Persis
       return !duplicate;
     } catch (error) {
       onDiskError?.(error);
-      memory.check(scopedKey, now);
       return true;
-    }
-  }
-
-  async function warmup(namespace = "global", onError?: (error: unknown) => void): Promise<number> {
-    const filePath = options.resolveFilePath(namespace);
-    const now = Date.now();
-    try {
-      const { value } = await readJsonFileWithFallback<PersistentDedupeData>(filePath, {});
-      const data = sanitizeData(value);
-      let loaded = 0;
-      for (const [key, ts] of Object.entries(data)) {
-        if (ttlMs > 0 && now - ts >= ttlMs) {
-          continue;
-        }
-        const scopedKey = `${namespace}:${key}`;
-        memory.check(scopedKey, ts);
-        loaded++;
-      }
-      return loaded;
-    } catch (error) {
-      onError?.(error);
-      return 0;
     }
   }
 
@@ -182,7 +158,6 @@ export function createPersistentDedupe(options: PersistentDedupeOptions): Persis
 
   return {
     checkAndRecord,
-    warmup,
     clearMemory: () => memory.clear(),
     memorySize: () => memory.size(),
   };

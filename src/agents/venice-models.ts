@@ -1,5 +1,4 @@
 import type { ModelDefinitionConfig } from "../config/types.js";
-import { retryAsync } from "../infra/retry.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
 const log = createSubsystemLogger("venice-models");
@@ -16,24 +15,6 @@ export const VENICE_DEFAULT_COST = {
   cacheRead: 0,
   cacheWrite: 0,
 };
-
-const VENICE_DISCOVERY_TIMEOUT_MS = 10_000;
-const VENICE_DISCOVERY_RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
-const VENICE_DISCOVERY_RETRYABLE_NETWORK_CODES = new Set([
-  "ECONNABORTED",
-  "ECONNREFUSED",
-  "ECONNRESET",
-  "EAI_AGAIN",
-  "ENETDOWN",
-  "ENETUNREACH",
-  "ENOTFOUND",
-  "ETIMEDOUT",
-  "UND_ERR_BODY_TIMEOUT",
-  "UND_ERR_CONNECT_TIMEOUT",
-  "UND_ERR_CONNECT_ERROR",
-  "UND_ERR_HEADERS_TIMEOUT",
-  "UND_ERR_SOCKET",
-]);
 
 /**
  * Complete catalog of Venice AI models.
@@ -295,7 +276,7 @@ export const VENICE_MODEL_CATALOG = [
   },
   {
     id: "minimax-m21",
-    name: "MiniMax M2.5 (via Venice)",
+    name: "MiniMax M2.1 (via Venice)",
     reasoning: true,
     input: ["text"],
     contextWindow: 202752,
@@ -351,67 +332,6 @@ interface VeniceModelsResponse {
   data: VeniceModel[];
 }
 
-class VeniceDiscoveryHttpError extends Error {
-  readonly status: number;
-
-  constructor(status: number) {
-    super(`HTTP ${status}`);
-    this.name = "VeniceDiscoveryHttpError";
-    this.status = status;
-  }
-}
-
-function staticVeniceModelDefinitions(): ModelDefinitionConfig[] {
-  return VENICE_MODEL_CATALOG.map(buildVeniceModelDefinition);
-}
-
-function hasRetryableNetworkCode(err: unknown): boolean {
-  const queue: unknown[] = [err];
-  const seen = new Set<unknown>();
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current || typeof current !== "object" || seen.has(current)) {
-      continue;
-    }
-    seen.add(current);
-    const candidate = current as {
-      cause?: unknown;
-      errors?: unknown;
-      code?: unknown;
-      errno?: unknown;
-    };
-    const code =
-      typeof candidate.code === "string"
-        ? candidate.code
-        : typeof candidate.errno === "string"
-          ? candidate.errno
-          : undefined;
-    if (code && VENICE_DISCOVERY_RETRYABLE_NETWORK_CODES.has(code)) {
-      return true;
-    }
-    if (candidate.cause) {
-      queue.push(candidate.cause);
-    }
-    if (Array.isArray(candidate.errors)) {
-      queue.push(...candidate.errors);
-    }
-  }
-  return false;
-}
-
-function isRetryableVeniceDiscoveryError(err: unknown): boolean {
-  if (err instanceof VeniceDiscoveryHttpError) {
-    return true;
-  }
-  if (err instanceof Error && err.name === "AbortError") {
-    return true;
-  }
-  if (err instanceof TypeError && err.message.toLowerCase() === "fetch failed") {
-    return true;
-  }
-  return hasRetryableNetworkCode(err);
-}
-
 /**
  * Discover models from Venice API with fallback to static catalog.
  * The /models endpoint is public and doesn't require authentication.
@@ -419,45 +339,23 @@ function isRetryableVeniceDiscoveryError(err: unknown): boolean {
 export async function discoverVeniceModels(): Promise<ModelDefinitionConfig[]> {
   // Skip API discovery in test environment
   if (process.env.NODE_ENV === "test" || process.env.VITEST) {
-    return staticVeniceModelDefinitions();
+    return VENICE_MODEL_CATALOG.map(buildVeniceModelDefinition);
   }
 
   try {
-    const response = await retryAsync(
-      async () => {
-        const currentResponse = await fetch(`${VENICE_BASE_URL}/models`, {
-          signal: AbortSignal.timeout(VENICE_DISCOVERY_TIMEOUT_MS),
-          headers: {
-            Accept: "application/json",
-          },
-        });
-        if (
-          !currentResponse.ok &&
-          VENICE_DISCOVERY_RETRYABLE_HTTP_STATUS.has(currentResponse.status)
-        ) {
-          throw new VeniceDiscoveryHttpError(currentResponse.status);
-        }
-        return currentResponse;
-      },
-      {
-        attempts: 3,
-        minDelayMs: 300,
-        maxDelayMs: 2000,
-        jitter: 0.2,
-        label: "venice-model-discovery",
-        shouldRetry: isRetryableVeniceDiscoveryError,
-      },
-    );
+    const response = await fetch(`${VENICE_BASE_URL}/models`, {
+      signal: AbortSignal.timeout(5000),
+    });
 
     if (!response.ok) {
       log.warn(`Failed to discover models: HTTP ${response.status}, using static catalog`);
-      return staticVeniceModelDefinitions();
+      return VENICE_MODEL_CATALOG.map(buildVeniceModelDefinition);
     }
 
     const data = (await response.json()) as VeniceModelsResponse;
     if (!Array.isArray(data.data) || data.data.length === 0) {
       log.warn("No models found from API, using static catalog");
-      return staticVeniceModelDefinitions();
+      return VENICE_MODEL_CATALOG.map(buildVeniceModelDefinition);
     }
 
     // Merge discovered models with catalog metadata
@@ -497,13 +395,9 @@ export async function discoverVeniceModels(): Promise<ModelDefinitionConfig[]> {
       }
     }
 
-    return models.length > 0 ? models : staticVeniceModelDefinitions();
+    return models.length > 0 ? models : VENICE_MODEL_CATALOG.map(buildVeniceModelDefinition);
   } catch (error) {
-    if (error instanceof VeniceDiscoveryHttpError) {
-      log.warn(`Failed to discover models: HTTP ${error.status}, using static catalog`);
-      return staticVeniceModelDefinitions();
-    }
     log.warn(`Discovery failed: ${String(error)}, using static catalog`);
-    return staticVeniceModelDefinitions();
+    return VENICE_MODEL_CATALOG.map(buildVeniceModelDefinition);
   }
 }

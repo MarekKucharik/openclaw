@@ -1,6 +1,6 @@
+import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import {
-  createReasoningFinalAnswerMessage,
   createStubSessionHarness,
   emitAssistantTextDelta,
   emitAssistantTextEnd,
@@ -22,7 +22,13 @@ describe("subscribeEmbeddedPiSession", () => {
     emitAssistantTextDelta({ emit, delta: "answer" });
     emitAssistantTextEnd({ emit });
 
-    const assistantMessage = createReasoningFinalAnswerMessage();
+    const assistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Because it helps" },
+        { type: "text", text: "Final answer" },
+      ],
+    } as AssistantMessage;
 
     emit({ type: "message_end", message: assistantMessage });
 
@@ -46,7 +52,13 @@ describe("subscribeEmbeddedPiSession", () => {
 
     expect(onPartialReply).not.toHaveBeenCalled();
 
-    const assistantMessage = createReasoningFinalAnswerMessage();
+    const assistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Because it helps" },
+        { type: "text", text: "Final answer" },
+      ],
+    } as AssistantMessage;
 
     emit({ type: "message_end", message: assistantMessage });
     emitAssistantTextEnd({ emit, content: "Draft reply" });

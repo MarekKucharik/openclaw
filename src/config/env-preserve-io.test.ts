@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect } from "vitest";
-import { withEnvAsync } from "../test-utils/env.js";
 import {
   createConfigIO,
   readConfigFileSnapshotForWrite,
@@ -23,8 +22,37 @@ async function withTempConfig(
   }
 }
 
+async function withEnvOverrides(
+  updates: Record<string, string | undefined>,
+  run: () => Promise<void>,
+): Promise<void> {
+  const previous = new Map<string, string | undefined>();
+  for (const key of Object.keys(updates)) {
+    previous.set(key, process.env[key]);
+  }
+
+  try {
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    await run();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 async function withWrapperEnvContext(configPath: string, run: () => Promise<void>): Promise<void> {
-  await withEnvAsync(
+  await withEnvOverrides(
     {
       OPENCLAW_CONFIG_PATH: configPath,
       OPENCLAW_DISABLE_CONFIG_CACHE: "1",

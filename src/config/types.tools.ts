@@ -92,16 +92,6 @@ export type MediaUnderstandingConfig = MediaProviderRequestConfig & {
   attachments?: MediaUnderstandingAttachmentsConfig;
   /** Ordered model list (fallbacks in order). */
   models?: MediaUnderstandingModelConfig[];
-  /**
-   * Echo the audio transcript back to the originating chat before agent processing.
-   * Lets users verify what was heard. Default: false.
-   */
-  echoTranscript?: boolean;
-  /**
-   * Format string for the echoed transcript. Use `{transcript}` as placeholder.
-   * Default: '📝 "{transcript}"'
-   */
-  echoFormat?: string;
 };
 
 export type LinkModelConfig = {
@@ -324,7 +314,7 @@ export type MemorySearchConfig = {
     sessionMemory?: boolean;
   };
   /** Embedding provider mode. */
-  provider?: "openai" | "gemini" | "local" | "voyage" | "mistral" | "ollama";
+  provider?: "openai" | "gemini" | "local" | "voyage" | "mistral";
   remote?: {
     baseUrl?: string;
     apiKey?: string;
@@ -343,7 +333,7 @@ export type MemorySearchConfig = {
     };
   };
   /** Fallback behavior when embeddings fail. */
-  fallback?: "openai" | "gemini" | "local" | "voyage" | "mistral" | "ollama" | "none";
+  fallback?: "openai" | "gemini" | "local" | "voyage" | "mistral" | "none";
   /** Embedding model id (remote) or alias (local). */
   model?: string;
   /** Local embedding settings (node-llama-cpp). */
@@ -452,11 +442,11 @@ export type ToolsConfig = {
       cacheTtlMinutes?: number;
       /** Perplexity-specific configuration (used when provider="perplexity"). */
       perplexity?: {
-        /** API key for Perplexity (defaults to PERPLEXITY_API_KEY env var). */
+        /** API key for Perplexity or OpenRouter (defaults to PERPLEXITY_API_KEY or OPENROUTER_API_KEY env var). */
         apiKey?: string;
-        /** @deprecated Legacy Sonar/OpenRouter field. Ignored by Search API. */
+        /** Base URL for API requests (defaults to OpenRouter: https://openrouter.ai/api/v1). */
         baseUrl?: string;
-        /** @deprecated Legacy Sonar/OpenRouter field. Ignored by Search API. */
+        /** Model to use (defaults to "perplexity/sonar-pro"). */
         model?: string;
       };
       /** Grok-specific configuration (used when provider="grok"). */

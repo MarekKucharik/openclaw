@@ -1,6 +1,5 @@
 import { Type } from "@sinclair/typebox";
 import { BLUEBUBBLES_GROUP_ACTIONS } from "../../channels/plugins/bluebubbles-actions.js";
-import { listChannelPlugins } from "../../channels/plugins/index.js";
 import {
   listChannelMessageActions,
   supportsChannelMessageButtons,
@@ -200,6 +199,24 @@ function buildSendSchema(options: {
     ),
     bestEffort: Type.Optional(Type.Boolean()),
     gifPlayback: Type.Optional(Type.Boolean()),
+    mentions: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          "List of phone numbers (E.164 format, e.g. +420724535280) to @mention in the message. WhatsApp only.",
+      }),
+    ),
+    mentionAll: Type.Optional(
+      Type.Boolean({
+        description:
+          "When true, mentions all participants in the group. WhatsApp only. Fetches group members automatically.",
+      }),
+    ),
+    imageUrl: Type.Optional(
+      Type.String({
+        description:
+          "Image URL for setProfilePicture action (WhatsApp only). Must be a publicly accessible URL.",
+      }),
+    ),
     buttons: Type.Optional(
       Type.Array(
         Type.Array(
@@ -242,14 +259,14 @@ function buildReactionSchema() {
     messageId: Type.Optional(
       Type.String({
         description:
-          "Target message id for reaction. If omitted, defaults to the current inbound message id when available.",
+          "Target message id for reaction. For Telegram, if omitted, defaults to the current inbound message id when available.",
       }),
     ),
     message_id: Type.Optional(
       Type.String({
         // Intentional duplicate alias for tool-schema discoverability in LLMs.
         description:
-          "snake_case alias of messageId. If omitted, defaults to the current inbound message id when available.",
+          "snake_case alias of messageId. For Telegram, if omitted, defaults to the current inbound message id when available.",
       }),
     ),
     emoji: Type.Optional(Type.String()),
@@ -277,34 +294,6 @@ function buildPollSchema() {
     pollOption: Type.Optional(Type.Array(Type.String())),
     pollDurationHours: Type.Optional(Type.Number()),
     pollMulti: Type.Optional(Type.Boolean()),
-    pollId: Type.Optional(Type.String()),
-    pollOptionId: Type.Optional(
-      Type.String({
-        description: "Poll answer id to vote for. Use when the channel exposes stable answer ids.",
-      }),
-    ),
-    pollOptionIds: Type.Optional(
-      Type.Array(
-        Type.String({
-          description:
-            "Poll answer ids to vote for in a multiselect poll. Use when the channel exposes stable answer ids.",
-        }),
-      ),
-    ),
-    pollOptionIndex: Type.Optional(
-      Type.Number({
-        description:
-          "1-based poll option number to vote for, matching the rendered numbered poll choices.",
-      }),
-    ),
-    pollOptionIndexes: Type.Optional(
-      Type.Array(
-        Type.Number({
-          description:
-            "1-based poll option numbers to vote for in a multiselect poll, matching the rendered numbered poll choices.",
-        }),
-      ),
-    ),
   };
 }
 
@@ -340,7 +329,6 @@ function buildThreadSchema() {
   return {
     threadName: Type.Optional(Type.String()),
     autoArchiveMin: Type.Optional(Type.Number()),
-    appliedTags: Type.Optional(Type.Array(Type.String())),
   };
 }
 
@@ -468,6 +456,7 @@ type MessageToolOptions = {
   currentChannelProvider?: string;
   currentThreadTs?: string;
   currentMessageId?: string | number;
+  currentMessageSenderId?: string;
   replyToMode?: "off" | "first" | "all";
   hasRepliedRef?: { value: boolean };
   sandboxRoot?: string;
@@ -490,18 +479,8 @@ function resolveMessageToolSchemaActions(params: {
       channel: currentChannel,
       currentChannelId: params.currentChannelId,
     });
-    const allActions = new Set<string>(["send", ...scopedActions]);
-    // Include actions from other configured channels so isolated/cron agents
-    // can invoke cross-channel actions without validation errors.
-    for (const plugin of listChannelPlugins()) {
-      if (plugin.id === currentChannel) {
-        continue;
-      }
-      for (const action of listChannelSupportedActions({ cfg: params.cfg, channel: plugin.id })) {
-        allActions.add(action);
-      }
-    }
-    return Array.from(allActions);
+    const withSend = new Set<string>(["send", ...scopedActions]);
+    return Array.from(withSend);
   }
   const actions = listChannelMessageActions(params.cfg);
   return actions.length > 0 ? actions : ["send"];
@@ -582,7 +561,7 @@ function buildMessageToolDescription(options?: {
 }): string {
   const baseDescription = "Send, delete, and manage messages via channel plugins.";
 
-  // If we have a current channel, show its actions and list other configured channels
+  // If we have a current channel, show only its supported actions
   if (options?.currentChannel) {
     const channelActions = filterActionsForContext({
       actions: listChannelSupportedActions({
@@ -596,25 +575,7 @@ function buildMessageToolDescription(options?: {
       // Always include "send" as a base action
       const allActions = new Set(["send", ...channelActions]);
       const actionList = Array.from(allActions).toSorted().join(", ");
-      let desc = `${baseDescription} Current channel (${options.currentChannel}) supports: ${actionList}.`;
-
-      // Include other configured channels so cron/isolated agents can discover them
-      const otherChannels: string[] = [];
-      for (const plugin of listChannelPlugins()) {
-        if (plugin.id === options.currentChannel) {
-          continue;
-        }
-        const actions = listChannelSupportedActions({ cfg: options.config, channel: plugin.id });
-        if (actions.length > 0) {
-          const all = new Set(["send", ...actions]);
-          otherChannels.push(`${plugin.id} (${Array.from(all).toSorted().join(", ")})`);
-        }
-      }
-      if (otherChannels.length > 0) {
-        desc += ` Other configured channels: ${otherChannels.join(", ")}.`;
-      }
-
-      return desc;
+      return `${baseDescription} Current channel (${options.currentChannel}) supports: ${actionList}.`;
     }
   }
 
@@ -714,6 +675,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         options?.currentChannelProvider ||
         options?.currentThreadTs ||
         hasCurrentMessageId ||
+        options?.currentMessageSenderId ||
         options?.replyToMode ||
         options?.hasRepliedRef
           ? {
@@ -721,6 +683,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
               currentChannelProvider: options?.currentChannelProvider,
               currentThreadTs: options?.currentThreadTs,
               currentMessageId: options?.currentMessageId,
+              currentMessageSenderId: options?.currentMessageSenderId,
               replyToMode: options?.replyToMode,
               hasRepliedRef: options?.hasRepliedRef,
               // Direct tool invocations should not add cross-context decoration.

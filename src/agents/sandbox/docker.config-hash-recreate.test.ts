@@ -3,7 +3,6 @@ import { Readable } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { computeSandboxConfigHash } from "./config-hash.js";
 import { ensureSandboxContainer } from "./docker.js";
-import { collectDockerFlagValues } from "./test-args.js";
 import type { SandboxConfig } from "./types.js";
 
 type SpawnCall = {
@@ -84,15 +83,11 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-function createSandboxConfig(
-  dns: string[],
-  binds?: string[],
-  workspaceAccess: "rw" | "ro" | "none" = "rw",
-): SandboxConfig {
+function createSandboxConfig(dns: string[], binds?: string[]): SandboxConfig {
   return {
     mode: "all",
     scope: "shared",
-    workspaceAccess,
+    workspaceAccess: "rw",
     workspaceRoot: "~/.openclaw/sandboxes",
     docker: {
       image: "openclaw-sandbox:test",
@@ -238,42 +233,16 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     expect(createCall).toBeDefined();
     expect(createCall?.args).toContain(`openclaw.configHash=${expectedHash}`);
 
-    const bindArgs = collectDockerFlagValues(createCall?.args ?? [], "-v");
+    const bindArgs: string[] = [];
+    const args = createCall?.args ?? [];
+    for (let i = 0; i < args.length; i += 1) {
+      if (args[i] === "-v" && typeof args[i + 1] === "string") {
+        bindArgs.push(args[i + 1]);
+      }
+    }
     const workspaceMountIdx = bindArgs.indexOf("/tmp/workspace:/workspace");
     const customMountIdx = bindArgs.indexOf("/tmp/workspace-shared/USER.md:/workspace/USER.md:ro");
     expect(workspaceMountIdx).toBeGreaterThanOrEqual(0);
     expect(customMountIdx).toBeGreaterThan(workspaceMountIdx);
   });
-
-  it.each([
-    { workspaceAccess: "rw" as const, expectedMainMount: "/tmp/workspace:/workspace" },
-    { workspaceAccess: "ro" as const, expectedMainMount: "/tmp/workspace:/workspace:ro" },
-    { workspaceAccess: "none" as const, expectedMainMount: "/tmp/workspace:/workspace:ro" },
-  ])(
-    "uses expected main mount permissions when workspaceAccess=$workspaceAccess",
-    async ({ workspaceAccess, expectedMainMount }) => {
-      const workspaceDir = "/tmp/workspace";
-      const cfg = createSandboxConfig([], undefined, workspaceAccess);
-
-      spawnState.inspectRunning = false;
-      spawnState.labelHash = "";
-      registryMocks.readRegistry.mockResolvedValue({ entries: [] });
-      registryMocks.updateRegistry.mockResolvedValue(undefined);
-
-      await ensureSandboxContainer({
-        sessionKey: "agent:main:session-1",
-        workspaceDir,
-        agentWorkspaceDir: workspaceDir,
-        cfg,
-      });
-
-      const createCall = spawnState.calls.find(
-        (call) => call.command === "docker" && call.args[0] === "create",
-      );
-      expect(createCall).toBeDefined();
-
-      const bindArgs = collectDockerFlagValues(createCall?.args ?? [], "-v");
-      expect(bindArgs).toContain(expectedMainMount);
-    },
-  );
 });

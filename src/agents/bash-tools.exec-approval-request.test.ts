@@ -40,10 +40,6 @@ describe("requestExecApprovalDecision", () => {
       agentId: "main",
       resolvedPath: "/usr/bin/echo",
       sessionKey: "session",
-      turnSourceChannel: "whatsapp",
-      turnSourceTo: "+15555550123",
-      turnSourceAccountId: "work",
-      turnSourceThreadId: "1739201675.123",
     });
 
     expect(result).toBe("allow-once");
@@ -61,10 +57,6 @@ describe("requestExecApprovalDecision", () => {
         agentId: "main",
         resolvedPath: "/usr/bin/echo",
         sessionKey: "session",
-        turnSourceChannel: "whatsapp",
-        turnSourceTo: "+15555550123",
-        turnSourceAccountId: "work",
-        turnSourceThreadId: "1739201675.123",
         timeoutMs: DEFAULT_APPROVAL_TIMEOUT_MS,
         twoPhase: true,
       },

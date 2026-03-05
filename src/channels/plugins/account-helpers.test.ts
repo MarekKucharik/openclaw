@@ -5,25 +5,14 @@ import { createAccountListHelpers } from "./account-helpers.js";
 const { listConfiguredAccountIds, listAccountIds, resolveDefaultAccountId } =
   createAccountListHelpers("testchannel");
 
-function cfg(accounts?: Record<string, unknown> | null, defaultAccount?: string): OpenClawConfig {
+function cfg(accounts?: Record<string, unknown> | null): OpenClawConfig {
   if (accounts === null) {
-    return {
-      channels: {
-        testchannel: defaultAccount ? { defaultAccount } : {},
-      },
-    } as unknown as OpenClawConfig;
+    return { channels: { testchannel: {} } } as unknown as OpenClawConfig;
   }
-  if (accounts === undefined && !defaultAccount) {
+  if (accounts === undefined) {
     return {} as unknown as OpenClawConfig;
   }
-  return {
-    channels: {
-      testchannel: {
-        ...(accounts === undefined ? {} : { accounts }),
-        ...(defaultAccount ? { defaultAccount } : {}),
-      },
-    },
-  } as unknown as OpenClawConfig;
+  return { channels: { testchannel: { accounts } } } as unknown as OpenClawConfig;
 }
 
 describe("createAccountListHelpers", () => {
@@ -67,18 +56,6 @@ describe("createAccountListHelpers", () => {
   });
 
   describe("resolveDefaultAccountId", () => {
-    it("prefers configured defaultAccount when it matches a configured account id", () => {
-      expect(resolveDefaultAccountId(cfg({ alpha: {}, beta: {} }, "beta"))).toBe("beta");
-    });
-
-    it("normalizes configured defaultAccount before matching", () => {
-      expect(resolveDefaultAccountId(cfg({ "router-d": {} }, "Router D"))).toBe("router-d");
-    });
-
-    it("falls back when configured defaultAccount is missing", () => {
-      expect(resolveDefaultAccountId(cfg({ beta: {}, alpha: {} }, "missing"))).toBe("alpha");
-    });
-
     it('returns "default" when present', () => {
       expect(resolveDefaultAccountId(cfg({ default: {}, other: {} }))).toBe("default");
     });

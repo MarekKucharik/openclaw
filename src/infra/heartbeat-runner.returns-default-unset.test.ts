@@ -38,9 +38,12 @@ let testRegistry: ReturnType<typeof getActivePluginRegistry> | null = null;
 let fixtureRoot = "";
 let fixtureCount = 0;
 
-const createCaseDir = async (prefix: string) => {
+const createCaseDir = async (prefix: string, { skipHeartbeatFile = false } = {}) => {
   const dir = path.join(fixtureRoot, `${prefix}-${fixtureCount++}`);
   await fs.mkdir(dir, { recursive: true });
+  if (!skipHeartbeatFile) {
+    await fs.writeFile(path.join(dir, "HEARTBEAT.md"), "- Check status\n", "utf-8");
+  }
   return dir;
 };
 

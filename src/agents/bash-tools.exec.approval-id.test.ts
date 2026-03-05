@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildSystemRunPreparePayload } from "../test-utils/system-run-prepare-payload.js";
 
 vi.mock("./tools/gateway.js", () => ({
   callGatewayTool: vi.fn(),
@@ -27,20 +26,6 @@ vi.mock("../infra/exec-obfuscation-detect.js", () => ({
 let callGatewayTool: typeof import("./tools/gateway.js").callGatewayTool;
 let createExecTool: typeof import("./bash-tools.exec.js").createExecTool;
 let detectCommandObfuscation: typeof import("../infra/exec-obfuscation-detect.js").detectCommandObfuscation;
-
-function buildPreparedSystemRunPayload(rawInvokeParams: unknown) {
-  const invoke = (rawInvokeParams ?? {}) as {
-    params?: {
-      command?: unknown;
-      rawCommand?: unknown;
-      cwd?: unknown;
-      agentId?: unknown;
-      sessionKey?: unknown;
-    };
-  };
-  const params = invoke.params ?? {};
-  return buildSystemRunPreparePayload(params);
-}
 
 describe("exec approvals", () => {
   let previousHome: string | undefined;
@@ -86,14 +71,8 @@ describe("exec approvals", () => {
         return { decision: "allow-once" };
       }
       if (method === "node.invoke") {
-        const invoke = params as { command?: string };
-        if (invoke.command === "system.run.prepare") {
-          return buildPreparedSystemRunPayload(params);
-        }
-        if (invoke.command === "system.run") {
-          invokeParams = params;
-          return { payload: { success: true, stdout: "ok" } };
-        }
+        invokeParams = params;
+        return { ok: true };
       }
       return { ok: true };
     });
@@ -137,16 +116,12 @@ describe("exec approvals", () => {
     };
 
     const calls: string[] = [];
-    vi.mocked(callGatewayTool).mockImplementation(async (method, _opts, params) => {
+    vi.mocked(callGatewayTool).mockImplementation(async (method) => {
       calls.push(method);
       if (method === "exec.approvals.node.get") {
         return { file: approvalsFile };
       }
       if (method === "node.invoke") {
-        const invoke = params as { command?: string };
-        if (invoke.command === "system.run.prepare") {
-          return buildPreparedSystemRunPayload(params);
-        }
         return { payload: { success: true, stdout: "ok" } };
       }
       // exec.approval.request should NOT be called when allowlist is satisfied
@@ -291,8 +266,7 @@ describe("exec approvals", () => {
     });
 
     const calls: string[] = [];
-    const nodeInvokeCommands: string[] = [];
-    vi.mocked(callGatewayTool).mockImplementation(async (method, _opts, params) => {
+    vi.mocked(callGatewayTool).mockImplementation(async (method) => {
       calls.push(method);
       if (method === "exec.approval.request") {
         return { status: "accepted", id: "approval-id" };
@@ -301,13 +275,6 @@ describe("exec approvals", () => {
         return {};
       }
       if (method === "node.invoke") {
-        const invoke = params as { command?: string };
-        if (invoke.command) {
-          nodeInvokeCommands.push(invoke.command);
-        }
-        if (invoke.command === "system.run.prepare") {
-          return buildPreparedSystemRunPayload(params);
-        }
         return { payload: { success: true, stdout: "should-not-run" } };
       }
       return { ok: true };
@@ -322,7 +289,7 @@ describe("exec approvals", () => {
 
     const result = await tool.execute("call5", { command: "echo hi | sh" });
     expect(result.details.status).toBe("approval-pending");
-    await expect.poll(() => nodeInvokeCommands.includes("system.run")).toBe(false);
+    await expect.poll(() => calls.filter((call) => call === "node.invoke").length).toBe(0);
   });
 
   it("denies gateway obfuscated command when approval request times out", async () => {

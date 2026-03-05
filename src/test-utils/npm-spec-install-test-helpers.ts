@@ -1,7 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
 import { expect } from "vitest";
-import type { CommandOptions, SpawnResult } from "../process/exec.js";
+import type { SpawnResult } from "../process/exec.js";
 import { expectSingleNpmInstallIgnoreScriptsCall } from "./exec-assertions.js";
 
 export type InstallResultLike = {
@@ -42,31 +40,10 @@ export async function expectUnsupportedNpmSpec(
 }
 
 export function mockNpmPackMetadataResult(
-  run: {
-    mockImplementation: (
-      implementation: (
-        argv: string[],
-        optionsOrTimeout: number | CommandOptions,
-      ) => Promise<SpawnResult>,
-    ) => unknown;
-  },
+  run: { mockResolvedValue: (value: SpawnResult) => unknown },
   metadata: NpmPackMetadata,
 ) {
-  run.mockImplementation(async (argv, optionsOrTimeout) => {
-    if (argv[0] !== "npm" || argv[1] !== "pack") {
-      throw new Error(`unexpected command: ${argv.join(" ")}`);
-    }
-
-    const cwd =
-      typeof optionsOrTimeout === "object" && optionsOrTimeout !== null
-        ? optionsOrTimeout.cwd
-        : undefined;
-    if (cwd) {
-      fs.writeFileSync(path.join(cwd, metadata.filename), "");
-    }
-
-    return createSuccessfulSpawnResult(JSON.stringify([metadata]));
-  });
+  run.mockResolvedValue(createSuccessfulSpawnResult(JSON.stringify([metadata])));
 }
 
 export function expectIntegrityDriftRejected(params: {

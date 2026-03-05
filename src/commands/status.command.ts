@@ -1,6 +1,6 @@
 import { formatCliCommand } from "../cli/command-format.js";
 import { withProgress } from "../cli/progress.js";
-import { loadConfig, resolveGatewayPort } from "../config/config.js";
+import { resolveGatewayPort } from "../config/config.js";
 import { buildGatewayConnectionDetails, callGateway } from "../gateway/call.js";
 import { info } from "../globals.js";
 import { formatTimeAgo } from "../infra/format-time/format-relative.ts";
@@ -21,7 +21,6 @@ import { theme } from "../terminal/theme.js";
 import { formatHealthChannelLines, type HealthSummary } from "./health.js";
 import { resolveControlUiLinks } from "./onboard-helpers.js";
 import { statusAllCommand } from "./status-all.js";
-import { groupChannelIssuesByChannel } from "./status-all/channel-issues.js";
 import { formatGatewayAuthUsed } from "./status-all/format.js";
 import { getDaemonStatusSummary, getNodeDaemonStatusSummary } from "./status.daemon.js";
 import {
@@ -81,33 +80,10 @@ export async function statusCommand(
     return;
   }
 
-  const [scan, securityAudit] = opts.json
-    ? await Promise.all([
-        scanStatus({ json: opts.json, timeoutMs: opts.timeoutMs, all: opts.all }, runtime),
-        runSecurityAudit({
-          config: loadConfig(),
-          deep: false,
-          includeFilesystem: true,
-          includeChannelSecurity: true,
-        }),
-      ])
-    : [
-        await scanStatus({ json: opts.json, timeoutMs: opts.timeoutMs, all: opts.all }, runtime),
-        await withProgress(
-          {
-            label: "Running security audit…",
-            indeterminate: true,
-            enabled: true,
-          },
-          async () =>
-            await runSecurityAudit({
-              config: loadConfig(),
-              deep: false,
-              includeFilesystem: true,
-              includeChannelSecurity: true,
-            }),
-        ),
-      ];
+  const scan = await scanStatus(
+    { json: opts.json, timeoutMs: opts.timeoutMs, all: opts.all },
+    runtime,
+  );
   const {
     cfg,
     osSummary,
@@ -128,6 +104,21 @@ export async function statusCommand(
     memory,
     memoryPlugin,
   } = scan;
+
+  const securityAudit = await withProgress(
+    {
+      label: "Running security audit…",
+      indeterminate: true,
+      enabled: opts.json !== true,
+    },
+    async () =>
+      await runSecurityAudit({
+        config: cfg,
+        deep: false,
+        includeFilesystem: true,
+        includeChannelSecurity: true,
+      }),
+  );
 
   const usage = opts.usage
     ? await withProgress(
@@ -501,7 +492,19 @@ export async function statusCommand(
 
   runtime.log("");
   runtime.log(theme.heading("Channels"));
-  const channelIssuesByChannel = groupChannelIssuesByChannel(channelIssues);
+  const channelIssuesByChannel = (() => {
+    const map = new Map<string, typeof channelIssues>();
+    for (const issue of channelIssues) {
+      const key = issue.channel;
+      const list = map.get(key);
+      if (list) {
+        list.push(issue);
+      } else {
+        map.set(key, [issue]);
+      }
+    }
+    return map;
+  })();
   runtime.log(
     renderTable({
       width: tableWidth,

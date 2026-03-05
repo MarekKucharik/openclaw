@@ -13,9 +13,6 @@ import {
   type WorkspaceBootstrapFile,
 } from "./workspace.js";
 
-export type BootstrapContextMode = "full" | "lightweight";
-export type BootstrapContextRunKind = "default" | "heartbeat" | "cron";
-
 export function makeBootstrapWarn(params: {
   sessionLabel: string;
   warn?: (message: string) => void;
@@ -44,23 +41,6 @@ function sanitizeBootstrapFiles(
   return sanitized;
 }
 
-function applyContextModeFilter(params: {
-  files: WorkspaceBootstrapFile[];
-  contextMode?: BootstrapContextMode;
-  runKind?: BootstrapContextRunKind;
-}): WorkspaceBootstrapFile[] {
-  const contextMode = params.contextMode ?? "full";
-  const runKind = params.runKind ?? "default";
-  if (contextMode !== "lightweight") {
-    return params.files;
-  }
-  if (runKind === "heartbeat") {
-    return params.files.filter((file) => file.name === "HEARTBEAT.md");
-  }
-  // cron/default lightweight mode keeps bootstrap context empty on purpose.
-  return [];
-}
-
 export async function resolveBootstrapFilesForRun(params: {
   workspaceDir: string;
   config?: OpenClawConfig;
@@ -68,8 +48,6 @@ export async function resolveBootstrapFilesForRun(params: {
   sessionId?: string;
   agentId?: string;
   warn?: (message: string) => void;
-  contextMode?: BootstrapContextMode;
-  runKind?: BootstrapContextRunKind;
 }): Promise<WorkspaceBootstrapFile[]> {
   const sessionKey = params.sessionKey ?? params.sessionId;
   const rawFiles = params.sessionKey
@@ -78,11 +56,7 @@ export async function resolveBootstrapFilesForRun(params: {
         sessionKey: params.sessionKey,
       })
     : await loadWorkspaceBootstrapFiles(params.workspaceDir);
-  const bootstrapFiles = applyContextModeFilter({
-    files: filterBootstrapFilesForSession(rawFiles, sessionKey),
-    contextMode: params.contextMode,
-    runKind: params.runKind,
-  });
+  const bootstrapFiles = filterBootstrapFilesForSession(rawFiles, sessionKey);
 
   const updated = await applyBootstrapHookOverrides({
     files: bootstrapFiles,
@@ -102,8 +76,6 @@ export async function resolveBootstrapContextForRun(params: {
   sessionId?: string;
   agentId?: string;
   warn?: (message: string) => void;
-  contextMode?: BootstrapContextMode;
-  runKind?: BootstrapContextRunKind;
 }): Promise<{
   bootstrapFiles: WorkspaceBootstrapFile[];
   contextFiles: EmbeddedContextFile[];

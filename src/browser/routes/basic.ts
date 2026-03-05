@@ -86,7 +86,7 @@ export function registerBrowserBasicRoutes(app: BrowserRouteRegistrar, ctx: Brow
       headless: current.resolved.headless,
       noSandbox: current.resolved.noSandbox,
       executablePath: current.resolved.executablePath ?? null,
-      attachOnly: profileCtx.profile.attachOnly,
+      attachOnly: current.resolved.attachOnly,
     });
   });
 

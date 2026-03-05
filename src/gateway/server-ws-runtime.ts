@@ -1,11 +1,25 @@
+import type { WebSocketServer } from "ws";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
+import type { AuthRateLimiter } from "./auth-rate-limit.js";
+import type { ResolvedGatewayAuth } from "./auth.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./server-methods/types.js";
-import {
-  attachGatewayWsConnectionHandler,
-  type GatewayWsSharedHandlerParams,
-} from "./server/ws-connection.js";
+import { attachGatewayWsConnectionHandler } from "./server/ws-connection.js";
+import type { GatewayWsClient } from "./server/ws-types.js";
 
-type GatewayWsRuntimeParams = GatewayWsSharedHandlerParams & {
+export function attachGatewayWsHandlers(params: {
+  wss: WebSocketServer;
+  clients: Set<GatewayWsClient>;
+  port: number;
+  gatewayHost?: string;
+  canvasHostEnabled: boolean;
+  canvasHostServerPort?: number;
+  resolvedAuth: ResolvedGatewayAuth;
+  /** Optional rate limiter for auth brute-force protection. */
+  rateLimiter?: AuthRateLimiter;
+  /** Browser-origin fallback limiter (loopback is never exempt). */
+  browserRateLimiter?: AuthRateLimiter;
+  gatewayMethods: string[];
+  events: string[];
   logGateway: ReturnType<typeof createSubsystemLogger>;
   logHealth: ReturnType<typeof createSubsystemLogger>;
   logWsControl: ReturnType<typeof createSubsystemLogger>;
@@ -19,9 +33,7 @@ type GatewayWsRuntimeParams = GatewayWsSharedHandlerParams & {
     },
   ) => void;
   context: GatewayRequestContext;
-};
-
-export function attachGatewayWsHandlers(params: GatewayWsRuntimeParams) {
+}) {
   attachGatewayWsConnectionHandler({
     wss: params.wss,
     clients: params.clients,

@@ -17,7 +17,6 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 let fixtureRoot = "";
 let fixtureCount = 0;
-let syncSourceTemplateDir = "";
 
 async function createCaseDir(prefix: string): Promise<string> {
   const dir = path.join(fixtureRoot, `${prefix}-${fixtureCount++}`);
@@ -27,27 +26,6 @@ async function createCaseDir(prefix: string): Promise<string> {
 
 beforeAll(async () => {
   fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-skills-sync-suite-"));
-  syncSourceTemplateDir = await createCaseDir("source-template");
-  await writeSkill({
-    dir: path.join(syncSourceTemplateDir, ".extra", "demo-skill"),
-    name: "demo-skill",
-    description: "Extra version",
-  });
-  await writeSkill({
-    dir: path.join(syncSourceTemplateDir, ".bundled", "demo-skill"),
-    name: "demo-skill",
-    description: "Bundled version",
-  });
-  await writeSkill({
-    dir: path.join(syncSourceTemplateDir, ".managed", "demo-skill"),
-    name: "demo-skill",
-    description: "Managed version",
-  });
-  await writeSkill({
-    dir: path.join(syncSourceTemplateDir, "skills", "demo-skill"),
-    name: "demo-skill",
-    description: "Workspace version",
-  });
 });
 
 afterAll(async () => {
@@ -61,18 +39,33 @@ describe("buildWorkspaceSkillsPrompt", () => {
   ) =>
     withEnv({ HOME: workspaceDir, PATH: "" }, () => buildWorkspaceSkillsPrompt(workspaceDir, opts));
 
-  const cloneSourceTemplate = async () => {
-    const sourceWorkspace = await createCaseDir("source");
-    await fs.cp(syncSourceTemplateDir, sourceWorkspace, { recursive: true });
-    return sourceWorkspace;
-  };
-
   it("syncs merged skills into a target workspace", async () => {
-    const sourceWorkspace = await cloneSourceTemplate();
+    const sourceWorkspace = await createCaseDir("source");
     const targetWorkspace = await createCaseDir("target");
     const extraDir = path.join(sourceWorkspace, ".extra");
     const bundledDir = path.join(sourceWorkspace, ".bundled");
     const managedDir = path.join(sourceWorkspace, ".managed");
+
+    await writeSkill({
+      dir: path.join(extraDir, "demo-skill"),
+      name: "demo-skill",
+      description: "Extra version",
+    });
+    await writeSkill({
+      dir: path.join(bundledDir, "demo-skill"),
+      name: "demo-skill",
+      description: "Bundled version",
+    });
+    await writeSkill({
+      dir: path.join(managedDir, "demo-skill"),
+      name: "demo-skill",
+      description: "Managed version",
+    });
+    await writeSkill({
+      dir: path.join(sourceWorkspace, "skills", "demo-skill"),
+      name: "demo-skill",
+      description: "Workspace version",
+    });
 
     await withEnv({ HOME: sourceWorkspace, PATH: "" }, () =>
       syncSkillsToWorkspace({

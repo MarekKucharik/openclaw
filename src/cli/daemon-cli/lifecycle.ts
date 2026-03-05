@@ -88,7 +88,6 @@ export async function runDaemonRestart(opts: DaemonLifecycleOptions = {}): Promi
         port: restartPort,
         attempts: POST_RESTART_HEALTH_ATTEMPTS,
         delayMs: POST_RESTART_HEALTH_DELAY_MS,
-        includeUnknownListenersAsStale: process.platform === "win32",
       });
 
       if (!health.healthy && health.staleGatewayPids.length > 0) {
@@ -106,7 +105,6 @@ export async function runDaemonRestart(opts: DaemonLifecycleOptions = {}): Promi
           port: restartPort,
           attempts: POST_RESTART_HEALTH_ATTEMPTS,
           delayMs: POST_RESTART_HEALTH_DELAY_MS,
-          includeUnknownListenersAsStale: process.platform === "win32",
         });
       }
 

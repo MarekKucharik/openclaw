@@ -26,8 +26,6 @@ export type RunEmbeddedPiAgentParams = {
   messageChannel?: string;
   messageProvider?: string;
   agentAccountId?: string;
-  /** What initiated this agent run: "user", "heartbeat", "cron", or "memory". */
-  trigger?: string;
   /** Delivery target (e.g. telegram:group:123:topic:456) for topic/thread routing. */
   messageTo?: string;
   /** Thread/topic identifier for routing replies to the originating thread. */
@@ -52,6 +50,8 @@ export type RunEmbeddedPiAgentParams = {
   currentThreadTs?: string;
   /** Current inbound message id for action fallbacks (e.g. Telegram react). */
   currentMessageId?: string | number;
+  /** Current inbound message sender JID for action fallbacks (e.g. WhatsApp react participant). */
+  currentMessageSenderId?: string;
   /** Reply-to mode for Slack auto-threading. */
   replyToMode?: "off" | "first" | "all";
   /** Mutable ref to track if a reply was sent (for "first" mode). */
@@ -81,14 +81,6 @@ export type RunEmbeddedPiAgentParams = {
   toolResultFormat?: ToolResultFormat;
   /** If true, suppress tool error warning payloads for this run (including mutating tools). */
   suppressToolErrorWarnings?: boolean;
-  /** Bootstrap context mode for workspace file injection. */
-  bootstrapContextMode?: "full" | "lightweight";
-  /** Run kind hint for context mode behavior. */
-  bootstrapContextRunKind?: "default" | "heartbeat" | "cron";
-  /** Seen bootstrap truncation warning signatures for this session (once mode dedupe). */
-  bootstrapPromptWarningSignaturesSeen?: string[];
-  /** Last shown bootstrap truncation warning signature for this session. */
-  bootstrapPromptWarningSignature?: string;
   execOverrides?: Pick<ExecToolDefaults, "host" | "security" | "ask" | "node">;
   bashElevated?: ExecElevatedDefaults;
   timeoutMs: number;

@@ -63,7 +63,7 @@ function normalizeHostnameAllowlist(values?: string[]): string[] {
   );
 }
 
-export function isPrivateNetworkAllowedByPolicy(policy?: SsrFPolicy): boolean {
+function resolveAllowPrivateNetwork(policy?: SsrFPolicy): boolean {
   return policy?.dangerouslyAllowPrivateNetwork === true || policy?.allowPrivateNetwork === true;
 }
 
@@ -282,7 +282,7 @@ export async function resolvePinnedHostnameWithPolicy(
     throw new Error("Invalid hostname");
   }
 
-  const allowPrivateNetwork = isPrivateNetworkAllowedByPolicy(params.policy);
+  const allowPrivateNetwork = resolveAllowPrivateNetwork(params.policy);
   const allowedHostnames = normalizeHostnameSet(params.policy?.allowedHostnames);
   const hostnameAllowlist = normalizeHostnameAllowlist(params.policy?.hostnameAllowlist);
   const isExplicitAllowed = allowedHostnames.has(normalized);
@@ -333,6 +333,8 @@ export function createPinnedDispatcher(pinned: PinnedHostname): Dispatcher {
   return new Agent({
     connect: {
       lookup: pinned.lookup,
+      autoSelectFamily: true,
+      autoSelectFamilyAttemptTimeout: 300,
     },
   });
 }

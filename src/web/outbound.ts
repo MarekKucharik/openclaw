@@ -148,6 +148,48 @@ export async function sendReactionWhatsApp(
   }
 }
 
+export async function updateProfilePictureWhatsApp(
+  imageUrl: string,
+  options?: { accountId?: string },
+): Promise<void> {
+  const { listener: active } = requireActiveWebListener(options?.accountId);
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  await (active as unknown as { updateProfilePicture: (img: Buffer) => Promise<void> }).updateProfilePicture(buffer);
+}
+
+export async function removeProfilePictureWhatsApp(
+  options?: { accountId?: string },
+): Promise<void> {
+  const { listener: active } = requireActiveWebListener(options?.accountId);
+  await (active as unknown as { removeProfilePicture: () => Promise<void> }).removeProfilePicture();
+}
+
+export async function updateGroupPictureWhatsApp(
+  to: string,
+  imageUrl: string,
+  options: { accountId?: string },
+): Promise<void> {
+  const { listener: active } = requireActiveWebListener(options.accountId);
+  const jid = toWhatsappJid(to);
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  await (active as unknown as { updateProfilePicture: (jid: string, img: Buffer) => Promise<void> }).updateProfilePicture(jid, buffer);
+}
+
+export async function pinMessageWhatsApp(
+  chatJid: string,
+  messageId: string,
+  type: number,
+  duration: number,
+  options: { fromMe?: boolean; accountId?: string },
+): Promise<void> {
+  const { listener: active } = requireActiveWebListener(options.accountId);
+  await (active as unknown as { pinMessage: (chatJid: string, messageId: string, type: number, duration: number, fromMe?: boolean) => Promise<void> }).pinMessage(chatJid, messageId, type, duration, options.fromMe);
+}
+
 export async function sendPollWhatsApp(
   to: string,
   poll: PollInput,

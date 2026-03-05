@@ -9,12 +9,8 @@ import { createReplyPrefixOptions } from "../../../channels/reply-prefix.js";
 import { createTypingCallbacks } from "../../../channels/typing.js";
 import { resolveStorePath, updateLastRoute } from "../../../config/sessions.js";
 import { danger, logVerbose, shouldLogVerbose } from "../../../globals.js";
-import { resolveAgentOutboundIdentity } from "../../../infra/outbound/identity.js";
-import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
-import { reactSlackMessage, removeSlackReaction } from "../../actions.js";
+import { removeSlackReaction } from "../../actions.js";
 import { createSlackDraftStream } from "../../draft-stream.js";
-import { normalizeSlackOutboundText } from "../../format.js";
-import { recordSlackThreadParticipation } from "../../sent-thread-cache.js";
 import {
   applyAppendOnlyStreamUpdate,
   buildStatusFinalPreviewText,
@@ -23,7 +19,6 @@ import {
 import type { SlackStreamSession } from "../../streaming.js";
 import { appendSlackStream, startSlackStream, stopSlackStream } from "../../streaming.js";
 import { resolveSlackThreadTargets } from "../../threading.js";
-import { normalizeSlackAllowOwnerEntry } from "../allow-list.js";
 import { createSlackReplyDeliveryPlan, deliverReplies, resolveSlackThreadTs } from "../replies.js";
 import type { PreparedSlackMessage } from "./types.js";
 
@@ -75,53 +70,27 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   const cfg = ctx.cfg;
   const runtime = ctx.runtime;
 
-  // Resolve agent identity for Slack chat:write.customize overrides.
-  const outboundIdentity = resolveAgentOutboundIdentity(cfg, route.agentId);
-  const slackIdentity = outboundIdentity
-    ? {
-        username: outboundIdentity.name,
-        iconUrl: outboundIdentity.avatarUrl,
-        iconEmoji: outboundIdentity.emoji,
-      }
-    : undefined;
-
   if (prepared.isDirectMessage) {
     const sessionCfg = cfg.session;
     const storePath = resolveStorePath(sessionCfg?.store, {
       agentId: route.agentId,
     });
-    const pinnedMainDmOwner = resolvePinnedMainDmOwnerFromAllowlist({
-      dmScope: cfg.session?.dmScope,
-      allowFrom: ctx.allowFrom,
-      normalizeEntry: normalizeSlackAllowOwnerEntry,
+    await updateLastRoute({
+      storePath,
+      sessionKey: route.mainSessionKey,
+      deliveryContext: {
+        channel: "slack",
+        to: `user:${message.user}`,
+        accountId: route.accountId,
+        threadId: prepared.ctxPayload.MessageThreadId,
+      },
+      ctx: prepared.ctxPayload,
     });
-    const senderRecipient = message.user?.trim().toLowerCase();
-    const skipMainUpdate =
-      pinnedMainDmOwner &&
-      senderRecipient &&
-      pinnedMainDmOwner.trim().toLowerCase() !== senderRecipient;
-    if (skipMainUpdate) {
-      logVerbose(
-        `slack: skip main-session last route for ${senderRecipient} (pinned owner ${pinnedMainDmOwner})`,
-      );
-    } else {
-      await updateLastRoute({
-        storePath,
-        sessionKey: route.mainSessionKey,
-        deliveryContext: {
-          channel: "slack",
-          to: `user:${message.user}`,
-          accountId: route.accountId,
-          threadId: prepared.ctxPayload.MessageThreadId,
-        },
-        ctx: prepared.ctxPayload,
-      });
-    }
   }
 
   const { statusThreadTs, isThreadReply } = resolveSlackThreadTargets({
     message,
-    replyToMode: prepared.replyToMode,
+    replyToMode: ctx.replyToMode,
   });
 
   const messageTs = message.ts ?? message.event_ts;
@@ -132,7 +101,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   // mark this to ensure only the first reply is threaded.
   const hasRepliedRef = { value: false };
   const replyPlan = createSlackReplyDeliveryPlan({
-    replyToMode: prepared.replyToMode,
+    replyToMode: ctx.replyToMode,
     incomingThreadTs,
     messageTs,
     hasRepliedRef,
@@ -140,7 +109,6 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   });
 
   const typingTarget = statusThreadTs ? `${message.channel}/${statusThreadTs}` : message.channel;
-  const typingReaction = ctx.typingReaction;
   const typingCallbacks = createTypingCallbacks({
     start: async () => {
       didSetStatus = true;
@@ -149,12 +117,6 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
         threadTs: statusThreadTs,
         status: "is typing...",
       });
-      if (typingReaction && message.ts) {
-        await reactSlackMessage(message.channel, message.ts, typingReaction, {
-          token: ctx.botToken,
-          client: ctx.app.client,
-        }).catch(() => {});
-      }
     },
     stop: async () => {
       if (!didSetStatus) {
@@ -166,12 +128,6 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
         threadTs: statusThreadTs,
         status: "",
       });
-      if (typingReaction && message.ts) {
-        await removeSlackReaction(message.channel, message.ts, typingReaction, {
-          token: ctx.botToken,
-          client: ctx.app.client,
-        }).catch(() => {});
-      }
     },
     onStartError: (err) => {
       logTypingFailure({
@@ -211,7 +167,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     nativeStreaming: slackStreaming.nativeStreaming,
   });
   const streamThreadHint = resolveSlackStreamingThreadHint({
-    replyToMode: prepared.replyToMode,
+    replyToMode: ctx.replyToMode,
     incomingThreadTs,
     messageTs,
     isThreadReply,
@@ -222,7 +178,6 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   });
   let streamSession: SlackStreamSession | null = null;
   let streamFailed = false;
-  let usedReplyThreadTs: string | undefined;
 
   const deliverNormally = async (payload: ReplyPayload, forcedThreadTs?: string): Promise<void> => {
     const replyThreadTs = forcedThreadTs ?? replyPlan.nextThreadTs();
@@ -234,13 +189,8 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
       runtime,
       textLimit: ctx.textLimit,
       replyThreadTs,
-      replyToMode: prepared.replyToMode,
-      ...(slackIdentity ? { identity: slackIdentity } : {}),
+      replyToMode: ctx.replyToMode,
     });
-    // Record the thread ts only after confirmed delivery success.
-    if (replyThreadTs) {
-      usedReplyThreadTs ??= replyThreadTs;
-    }
     replyPlan.markSent();
   };
 
@@ -273,7 +223,6 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
           teamId: ctx.teamId,
           userId: message.user,
         });
-        usedReplyThreadTs ??= streamThreadTs;
         replyPlan.markSent();
         return;
       }
@@ -322,7 +271,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
             token: ctx.botToken,
             channel: draftChannelId,
             ts: draftMessageId,
-            text: normalizeSlackOutboundText(finalText.trim()),
+            text: finalText.trim(),
           });
           return;
         } catch (err) {
@@ -363,13 +312,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     token: ctx.botToken,
     accountId: account.accountId,
     maxChars: Math.min(ctx.textLimit, 4000),
-    resolveThreadTs: () => {
-      const ts = replyPlan.nextThreadTs();
-      if (ts) {
-        usedReplyThreadTs ??= ts;
-      }
-      return ts;
-    },
+    resolveThreadTs: () => replyPlan.nextThreadTs(),
     onMessageSent: () => replyPlan.markSent(),
     log: logVerbose,
     warn: logVerbose,
@@ -469,14 +412,6 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   }
 
   const anyReplyDelivered = queuedFinal || (counts.block ?? 0) > 0 || (counts.final ?? 0) > 0;
-
-  // Record thread participation only when we actually delivered a reply and
-  // know the thread ts that was used (set by deliverNormally, streaming start,
-  // or draft stream). Falls back to statusThreadTs for edge cases.
-  const participationThreadTs = usedReplyThreadTs ?? statusThreadTs;
-  if (anyReplyDelivered && participationThreadTs) {
-    recordSlackThreadParticipation(account.accountId, message.channel, participationThreadTs);
-  }
 
   if (!anyReplyDelivered) {
     await draftStream.clear();

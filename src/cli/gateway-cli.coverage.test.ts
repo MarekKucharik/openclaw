@@ -1,7 +1,6 @@
 import { Command } from "commander";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { withEnvOverride } from "../config/test-helpers.js";
-import { GatewayLockError } from "../infra/gateway-lock.js";
 import { createCliRuntimeCapture } from "./test-runtime-capture.js";
 
 type DiscoveredBeacon = Awaited<
@@ -27,8 +26,6 @@ const discoverGatewayBeacons = vi.fn<(opts: unknown) => Promise<DiscoveredBeacon
   async () => [],
 );
 const gatewayStatusCommand = vi.fn<(opts: unknown) => Promise<void>>(async () => {});
-const inspectPortUsage = vi.fn(async (_port: number) => ({ status: "free" as const }));
-const formatPortDiagnostics = vi.fn((_diagnostics: unknown) => [] as string[]);
 
 const { runtimeLogs, runtimeErrors, defaultRuntime, resetRuntimeCapture } =
   createCliRuntimeCapture();
@@ -88,13 +85,7 @@ vi.mock("../commands/gateway-status.js", () => ({
   gatewayStatusCommand: (opts: unknown) => gatewayStatusCommand(opts),
 }));
 
-vi.mock("../infra/ports.js", () => ({
-  inspectPortUsage: (port: number) => inspectPortUsage(port),
-  formatPortDiagnostics: (diagnostics: unknown) => formatPortDiagnostics(diagnostics),
-}));
-
 const { registerGatewayCli } = await import("./gateway-cli.js");
-let gatewayProgram: Command;
 
 function createGatewayProgram() {
   const program = new Command();
@@ -104,7 +95,8 @@ function createGatewayProgram() {
 }
 
 async function runGatewayCommand(args: string[]) {
-  await gatewayProgram.parseAsync(args, { from: "user" });
+  const program = createGatewayProgram();
+  await program.parseAsync(args, { from: "user" });
 }
 
 async function expectGatewayExit(args: string[]) {
@@ -112,12 +104,6 @@ async function expectGatewayExit(args: string[]) {
 }
 
 describe("gateway-cli coverage", () => {
-  beforeEach(() => {
-    gatewayProgram = createGatewayProgram();
-    inspectPortUsage.mockClear();
-    formatPortDiagnostics.mockClear();
-  });
-
   it("registers call/health commands and routes to callGateway", async () => {
     resetRuntimeCapture();
     callGateway.mockClear();
@@ -226,6 +212,8 @@ describe("gateway-cli coverage", () => {
   it("prints stop hints on GatewayLockError when service is loaded", async () => {
     resetRuntimeCapture();
     serviceIsLoaded.mockResolvedValue(true);
+
+    const { GatewayLockError } = await import("../infra/gateway-lock.js");
     startGatewayServer.mockRejectedValueOnce(
       new GatewayLockError("another gateway instance is already listening"),
     );

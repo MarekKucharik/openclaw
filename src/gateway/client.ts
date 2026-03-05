@@ -21,8 +21,7 @@ import {
   type GatewayClientMode,
   type GatewayClientName,
 } from "../utils/message-channel.js";
-import { VERSION } from "../version.js";
-import { buildDeviceAuthPayloadV3 } from "./device-auth.js";
+import { buildDeviceAuthPayload } from "./device-auth.js";
 import { isSecureWebSocketUrl } from "./net.js";
 import {
   type ConnectParams,
@@ -53,7 +52,6 @@ export type GatewayClientOptions = {
   clientDisplayName?: string;
   clientVersion?: string;
   platform?: string;
-  deviceFamily?: string;
   mode?: GatewayClientMode;
   role?: string;
   scopes?: string[];
@@ -115,11 +113,10 @@ export class GatewayClient {
       return;
     }
 
-    const allowPrivateWs = process.env.OPENCLAW_ALLOW_INSECURE_PRIVATE_WS === "1";
     // Security check: block ALL plaintext ws:// to non-loopback addresses (CWE-319, CVSS 9.8)
     // This protects both credentials AND chat/conversation data from MITM attacks.
     // Device tokens may be loaded later in sendConnect(), so we block regardless of hasCredentials.
-    if (!isSecureWebSocketUrl(url, { allowPrivateWs })) {
+    if (!isSecureWebSocketUrl(url)) {
       // Safe hostname extraction - avoid throwing on malformed URLs in error path
       let displayHost = url;
       try {
@@ -132,9 +129,6 @@ export class GatewayClient {
           "Both credentials and chat data would be exposed to network interception. " +
           "Use wss:// for remote URLs. Safe defaults: keep gateway.bind=loopback and connect via SSH tunnel " +
           "(ssh -N -L 18789:127.0.0.1:18789 user@gateway-host), or use Tailscale Serve/Funnel. " +
-          (allowPrivateWs
-            ? ""
-            : "Break-glass (trusted private networks only): set OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1. ") +
           "Run `openclaw doctor --fix` for guidance.",
       );
       this.opts.onConnectError?.(error);
@@ -271,12 +265,11 @@ export class GatewayClient {
         : undefined;
     const signedAtMs = Date.now();
     const scopes = this.opts.scopes ?? ["operator.admin"];
-    const platform = this.opts.platform ?? process.platform;
     const device = (() => {
       if (!this.opts.deviceIdentity) {
         return undefined;
       }
-      const payload = buildDeviceAuthPayloadV3({
+      const payload = buildDeviceAuthPayload({
         deviceId: this.opts.deviceIdentity.deviceId,
         clientId: this.opts.clientName ?? GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
         clientMode: this.opts.mode ?? GATEWAY_CLIENT_MODES.BACKEND,
@@ -285,8 +278,6 @@ export class GatewayClient {
         signedAtMs,
         token: authToken ?? null,
         nonce,
-        platform,
-        deviceFamily: this.opts.deviceFamily,
       });
       const signature = signDevicePayload(this.opts.deviceIdentity.privateKeyPem, payload);
       return {
@@ -303,9 +294,8 @@ export class GatewayClient {
       client: {
         id: this.opts.clientName ?? GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
         displayName: this.opts.clientDisplayName,
-        version: this.opts.clientVersion ?? VERSION,
-        platform,
-        deviceFamily: this.opts.deviceFamily,
+        version: this.opts.clientVersion ?? "dev",
+        platform: this.opts.platform ?? process.platform,
         mode: this.opts.mode ?? GATEWAY_CLIENT_MODES.BACKEND,
         instanceId: this.opts.instanceId,
       },

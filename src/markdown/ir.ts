@@ -400,30 +400,6 @@ function appendCellTextOnly(state: RenderState, cell: TableCell) {
   // Do not append styles - this is used for code blocks where inner styles would overlap
 }
 
-function appendTableBulletValue(
-  state: RenderState,
-  params: {
-    header?: TableCell;
-    value?: TableCell;
-    columnIndex: number;
-    includeColumnFallback: boolean;
-  },
-) {
-  const { header, value, columnIndex, includeColumnFallback } = params;
-  if (!value?.text) {
-    return;
-  }
-  state.text += "• ";
-  if (header?.text) {
-    appendCell(state, header);
-    state.text += ": ";
-  } else if (includeColumnFallback) {
-    state.text += `Column ${columnIndex}: `;
-  }
-  appendCell(state, value);
-  state.text += "\n";
-}
-
 function renderTableAsBullets(state: RenderState) {
   if (!state.table) {
     return;
@@ -460,12 +436,20 @@ function renderTableAsBullets(state: RenderState) {
 
       // Add each column as a bullet point
       for (let i = 1; i < row.length; i++) {
-        appendTableBulletValue(state, {
-          header: headers[i],
-          value: row[i],
-          columnIndex: i,
-          includeColumnFallback: true,
-        });
+        const header = headers[i];
+        const value = row[i];
+        if (!value?.text) {
+          continue;
+        }
+        state.text += "• ";
+        if (header?.text) {
+          appendCell(state, header);
+          state.text += ": ";
+        } else {
+          state.text += `Column ${i}: `;
+        }
+        appendCell(state, value);
+        state.text += "\n";
       }
       state.text += "\n";
     }
@@ -473,12 +457,18 @@ function renderTableAsBullets(state: RenderState) {
     // Simple table: just list headers and values
     for (const row of rows) {
       for (let i = 0; i < row.length; i++) {
-        appendTableBulletValue(state, {
-          header: headers[i],
-          value: row[i],
-          columnIndex: i,
-          includeColumnFallback: false,
-        });
+        const header = headers[i];
+        const value = row[i];
+        if (!value?.text) {
+          continue;
+        }
+        state.text += "• ";
+        if (header?.text) {
+          appendCell(state, header);
+          state.text += ": ";
+        }
+        appendCell(state, value);
+        state.text += "\n";
       }
       state.text += "\n";
     }
@@ -823,19 +813,6 @@ function mergeStyleSpans(spans: MarkdownStyleSpan[]): MarkdownStyleSpan[] {
   return merged;
 }
 
-function resolveSliceBounds(
-  span: { start: number; end: number },
-  start: number,
-  end: number,
-): { start: number; end: number } | null {
-  const sliceStart = Math.max(span.start, start);
-  const sliceEnd = Math.min(span.end, end);
-  if (sliceEnd <= sliceStart) {
-    return null;
-  }
-  return { start: sliceStart, end: sliceEnd };
-}
-
 function sliceStyleSpans(
   spans: MarkdownStyleSpan[],
   start: number,
@@ -846,15 +823,15 @@ function sliceStyleSpans(
   }
   const sliced: MarkdownStyleSpan[] = [];
   for (const span of spans) {
-    const bounds = resolveSliceBounds(span, start, end);
-    if (!bounds) {
-      continue;
+    const sliceStart = Math.max(span.start, start);
+    const sliceEnd = Math.min(span.end, end);
+    if (sliceEnd > sliceStart) {
+      sliced.push({
+        start: sliceStart - start,
+        end: sliceEnd - start,
+        style: span.style,
+      });
     }
-    sliced.push({
-      start: bounds.start - start,
-      end: bounds.end - start,
-      style: span.style,
-    });
   }
   return mergeStyleSpans(sliced);
 }
@@ -865,15 +842,15 @@ function sliceLinkSpans(spans: MarkdownLinkSpan[], start: number, end: number): 
   }
   const sliced: MarkdownLinkSpan[] = [];
   for (const span of spans) {
-    const bounds = resolveSliceBounds(span, start, end);
-    if (!bounds) {
-      continue;
+    const sliceStart = Math.max(span.start, start);
+    const sliceEnd = Math.min(span.end, end);
+    if (sliceEnd > sliceStart) {
+      sliced.push({
+        start: sliceStart - start,
+        end: sliceEnd - start,
+        href: span.href,
+      });
     }
-    sliced.push({
-      start: bounds.start - start,
-      end: bounds.end - start,
-      href: span.href,
-    });
   }
   return sliced;
 }

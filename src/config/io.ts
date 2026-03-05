@@ -15,7 +15,7 @@ import {
 } from "../infra/shell-env.js";
 import { VERSION } from "../version.js";
 import { DuplicateAgentDirError, findDuplicateAgentDirs } from "./agent-dirs.js";
-import { maintainConfigBackups } from "./backup-rotation.js";
+import { rotateConfigBackups } from "./backup-rotation.js";
 import {
   applyCompactionDefaults,
   applyContextPruningDefaults,
@@ -34,11 +34,7 @@ import {
   resolveConfigEnvVars,
 } from "./env-substitution.js";
 import { applyConfigEnvVars } from "./env-vars.js";
-import {
-  ConfigIncludeError,
-  readConfigIncludeFileWithGuards,
-  resolveConfigIncludes,
-} from "./includes.js";
+import { ConfigIncludeError, resolveConfigIncludes } from "./includes.js";
 import { findLegacyConfigIssues } from "./legacy.js";
 import { applyMergePatch } from "./merge-patch.js";
 import { normalizeExecSafeBinProfilesInConfig } from "./normalize-exec-safe-bin.js";
@@ -638,13 +634,6 @@ function resolveConfigIncludesForRead(
 ): unknown {
   return resolveConfigIncludes(parsed, configPath, {
     readFile: (candidate) => deps.fs.readFileSync(candidate, "utf-8"),
-    readFileWithGuards: ({ includePath, resolvedPath, rootRealDir }) =>
-      readConfigIncludeFileWithGuards({
-        includePath,
-        resolvedPath,
-        rootRealDir,
-        ioFs: deps.fs,
-      }),
     parseJson: (raw) => deps.json5.parse(raw),
   });
 }
@@ -720,7 +709,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
           loggedInvalidConfigs.add(configPath);
           deps.logger.error(`Invalid config at ${configPath}:\\n${details}`);
         }
-        const error = new Error(`Invalid config at ${configPath}:\n${details}`);
+        const error = new Error("Invalid config");
         (error as { code?: string; details?: string }).code = "INVALID_CONFIG";
         (error as { code?: string; details?: string }).details = details;
         throw error;
@@ -925,9 +914,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       }
 
       const resolvedConfigRaw = readResolution.resolvedConfigRaw;
-      // Detect legacy keys on resolved config, but only mark source-literal legacy
-      // entries (for auto-migration) when they are present in the parsed source.
-      const legacyIssues = findLegacyConfigIssues(resolvedConfigRaw, parsedRes.parsed);
+      const legacyIssues = findLegacyConfigIssues(resolvedConfigRaw);
 
       const validated = validateConfigObjectWithPlugins(resolvedConfigRaw);
       if (!validated.ok) {
@@ -1045,13 +1032,6 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       try {
         const resolvedIncludes = resolveConfigIncludes(snapshot.parsed, configPath, {
           readFile: (candidate) => deps.fs.readFileSync(candidate, "utf-8"),
-          readFileWithGuards: ({ includePath, resolvedPath, rootRealDir }) =>
-            readConfigIncludeFileWithGuards({
-              includePath,
-              resolvedPath,
-              rootRealDir,
-              ioFs: deps.fs,
-            }),
           parseJson: (raw) => deps.json5.parse(raw),
         });
         const collected = new Map<string, string>();
@@ -1241,7 +1221,10 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       });
 
       if (deps.fs.existsSync(configPath)) {
-        await maintainConfigBackups(configPath, deps.fs.promises);
+        await rotateConfigBackups(configPath, deps.fs.promises);
+        await deps.fs.promises.copyFile(configPath, `${configPath}.bak`).catch(() => {
+          // best-effort
+        });
       }
 
       try {
@@ -1297,8 +1280,6 @@ let configCache: {
   expiresAt: number;
   config: OpenClawConfig;
 } | null = null;
-let runtimeConfigSnapshot: OpenClawConfig | null = null;
-let runtimeConfigSourceSnapshot: OpenClawConfig | null = null;
 
 function resolveConfigCacheMs(env: NodeJS.ProcessEnv): number {
   const raw = env.OPENCLAW_CONFIG_CACHE_MS?.trim();
@@ -1326,29 +1307,7 @@ export function clearConfigCache(): void {
   configCache = null;
 }
 
-export function setRuntimeConfigSnapshot(
-  config: OpenClawConfig,
-  sourceConfig?: OpenClawConfig,
-): void {
-  runtimeConfigSnapshot = config;
-  runtimeConfigSourceSnapshot = sourceConfig ?? null;
-  clearConfigCache();
-}
-
-export function clearRuntimeConfigSnapshot(): void {
-  runtimeConfigSnapshot = null;
-  runtimeConfigSourceSnapshot = null;
-  clearConfigCache();
-}
-
-export function getRuntimeConfigSnapshot(): OpenClawConfig | null {
-  return runtimeConfigSnapshot;
-}
-
 export function loadConfig(): OpenClawConfig {
-  if (runtimeConfigSnapshot) {
-    return runtimeConfigSnapshot;
-  }
   const io = createConfigIO();
   const configPath = io.configPath;
   const now = Date.now();
@@ -1385,14 +1344,9 @@ export async function writeConfigFile(
   options: ConfigWriteOptions = {},
 ): Promise<void> {
   const io = createConfigIO();
-  let nextCfg = cfg;
-  if (runtimeConfigSnapshot && runtimeConfigSourceSnapshot) {
-    const runtimePatch = createMergePatch(runtimeConfigSnapshot, cfg);
-    nextCfg = coerceConfig(applyMergePatch(runtimeConfigSourceSnapshot, runtimePatch));
-  }
   const sameConfigPath =
     options.expectedConfigPath === undefined || options.expectedConfigPath === io.configPath;
-  await io.writeConfigFile(nextCfg, {
+  await io.writeConfigFile(cfg, {
     envSnapshotForRestore: sameConfigPath ? options.envSnapshotForRestore : undefined,
     unsetPaths: options.unsetPaths,
   });

@@ -2,19 +2,20 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { note } from "../terminal/note.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { runDoctorConfigWithInput } from "./doctor-config-flow.test-utils.js";
 
+const { noteSpy } = vi.hoisted(() => ({
+  noteSpy: vi.fn(),
+}));
+
 vi.mock("../terminal/note.js", () => ({
-  note: vi.fn(),
+  note: noteSpy,
 }));
 
 import { loadAndMaybeMigrateDoctorConfig } from "./doctor-config-flow.js";
 
 describe("doctor config flow safe bins", () => {
-  const noteSpy = vi.mocked(note);
-
   beforeEach(() => {
     noteSpy.mockClear();
   });

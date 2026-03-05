@@ -3,7 +3,6 @@ import type { Context } from "@mariozechner/pi-ai/dist/types.js";
 import { describe, expect, it } from "vitest";
 import {
   asRecord,
-  expectConvertedRoles,
   makeGeminiCliAssistantMessage,
   makeGeminiCliModel,
   makeGoogleAssistantMessage,
@@ -32,7 +31,10 @@ describe("google-shared convertTools", () => {
     } as unknown as Context;
 
     const contents = convertMessages(model, context);
-    expectConvertedRoles(contents, ["user", "model", "model"]);
+    expect(contents).toHaveLength(3);
+    expect(contents[0].role).toBe("user");
+    expect(contents[1].role).toBe("model");
+    expect(contents[2].role).toBe("model");
     const toolCallPart = contents[2].parts?.find(
       (part) => typeof part === "object" && part !== null && "functionCall" in part,
     );

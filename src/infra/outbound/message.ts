@@ -9,7 +9,10 @@ import {
   type GatewayClientMode,
   type GatewayClientName,
 } from "../../utils/message-channel.js";
-import { resolveOutboundChannelPlugin } from "./channel-resolution.js";
+import {
+  normalizeDeliverableOutboundChannel,
+  resolveOutboundChannelPlugin,
+} from "./channel-resolution.js";
 import { resolveMessageChannelSelection } from "./channel-selection.js";
 import {
   deliverOutboundPayloads,
@@ -17,7 +20,6 @@ import {
   type OutboundSendDeps,
 } from "./deliver.js";
 import { normalizeReplyPayloadsForDelivery } from "./payloads.js";
-import { buildOutboundSessionContext } from "./session-context.js";
 import { resolveOutboundTarget } from "./targets.js";
 
 export type MessageGatewayOptions = {
@@ -38,6 +40,8 @@ type MessageSendParams = {
   mediaUrl?: string;
   mediaUrls?: string[];
   gifPlayback?: boolean;
+  mentions?: string[];
+  mentionAll?: boolean;
   accountId?: string;
   replyToId?: string;
   threadId?: string | number;
@@ -108,12 +112,14 @@ async function resolveRequiredChannel(params: {
   cfg: OpenClawConfig;
   channel?: string;
 }): Promise<string> {
-  return (
-    await resolveMessageChannelSelection({
-      cfg: params.cfg,
-      channel: params.channel,
-    })
-  ).channel;
+  if (params.channel?.trim()) {
+    const normalized = normalizeDeliverableOutboundChannel(params.channel);
+    if (!normalized) {
+      throw new Error(`Unknown channel: ${params.channel}`);
+    }
+    return normalized;
+  }
+  return (await resolveMessageChannelSelection({ cfg: params.cfg })).channel;
 }
 
 function resolveRequiredPlugin(channel: string, cfg: OpenClawConfig) {
@@ -208,21 +214,18 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       throw resolvedTarget.error;
     }
 
-    const outboundSession = buildOutboundSessionContext({
-      cfg,
-      agentId: params.agentId,
-      sessionKey: params.mirror?.sessionKey,
-    });
     const results = await deliverOutboundPayloads({
       cfg,
       channel: outboundChannel,
       to: resolvedTarget.to,
-      session: outboundSession,
+      agentId: params.agentId,
       accountId: params.accountId,
       payloads: normalizedPayloads,
       replyToId: params.replyToId,
       threadId: params.threadId,
       gifPlayback: params.gifPlayback,
+      mentions: params.mentions,
+      mentionAll: params.mentionAll,
       deps: params.deps,
       bestEffort: params.bestEffort,
       abortSignal: params.abortSignal,
@@ -255,6 +258,8 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       mediaUrl: params.mediaUrl,
       mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : params.mediaUrls,
       gifPlayback: params.gifPlayback,
+      mentions: params.mentions,
+      mentionAll: params.mentionAll,
       accountId: params.accountId,
       agentId: params.agentId,
       channel,

@@ -18,9 +18,6 @@ export type GatewayClient = {
   connect: ConnectParams;
   connId?: string;
   clientIp?: string;
-  canvasHostUrl?: string;
-  canvasCapability?: string;
-  canvasCapabilityExpiresAtMs?: number;
 };
 
 export type RespondFn = (

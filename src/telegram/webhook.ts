@@ -120,7 +120,7 @@ export async function startTelegramWebhook(opts: {
   });
 
   if (diagnosticsEnabled) {
-    startDiagnosticHeartbeat(opts.config);
+    startDiagnosticHeartbeat();
   }
 
   const server = createServer((req, res) => {
@@ -222,8 +222,6 @@ export async function startTelegramWebhook(opts: {
     port,
     host,
   });
-  const boundAddress = server.address();
-  const boundPort = boundAddress && typeof boundAddress !== "string" ? boundAddress.port : port;
 
   const publicUrl = resolveWebhookPublicUrl({
     configuredPublicUrl: opts.publicUrl,
@@ -252,8 +250,7 @@ export async function startTelegramWebhook(opts: {
     throw err;
   }
 
-  runtime.log?.(`webhook local listener on http://${host}:${boundPort}${path}`);
-  runtime.log?.(`webhook advertised to telegram on ${publicUrl}`);
+  runtime.log?.(`webhook listening on ${publicUrl}`);
 
   let shutDown = false;
   const shutdown = () => {

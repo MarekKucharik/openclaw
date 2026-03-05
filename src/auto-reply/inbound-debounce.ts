@@ -39,16 +39,14 @@ type DebounceBuffer<T> = {
   debounceMs: number;
 };
 
-export type InboundDebounceCreateParams<T> = {
+export function createInboundDebouncer<T>(params: {
   debounceMs: number;
   buildKey: (item: T) => string | null | undefined;
   shouldDebounce?: (item: T) => boolean;
   resolveDebounceMs?: (item: T) => number | undefined;
   onFlush: (items: T[]) => Promise<void>;
   onError?: (err: unknown, items: T[]) => void;
-};
-
-export function createInboundDebouncer<T>(params: InboundDebounceCreateParams<T>) {
+}) {
   const buffers = new Map<string, DebounceBuffer<T>>();
   const defaultDebounceMs = Math.max(0, Math.trunc(params.debounceMs));
 
@@ -103,11 +101,7 @@ export function createInboundDebouncer<T>(params: InboundDebounceCreateParams<T>
       if (key && buffers.has(key)) {
         await flushKey(key);
       }
-      try {
-        await params.onFlush([item]);
-      } catch (err) {
-        params.onError?.(err, [item]);
-      }
+      await params.onFlush([item]);
       return;
     }
 

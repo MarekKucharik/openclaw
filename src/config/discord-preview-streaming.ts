@@ -83,7 +83,7 @@ export function resolveTelegramPreviewStreamMode(
   if (typeof params.streaming === "boolean") {
     return params.streaming ? "partial" : "off";
   }
-  return "partial";
+  return "off";
 }
 
 export function resolveDiscordPreviewStreamMode(
@@ -121,9 +121,9 @@ export function resolveSlackStreamingMode(
   if (legacyStreamMode) {
     return mapSlackLegacyDraftStreamModeToStreaming(legacyStreamMode);
   }
-  // Legacy boolean `streaming` values map to the unified enum.
+  // Legacy `streaming` was a Slack native-streaming toggle; preview mode stayed replace.
   if (typeof params.streaming === "boolean") {
-    return params.streaming ? "partial" : "off";
+    return "partial";
   }
   return "partial";
 }
@@ -141,18 +141,4 @@ export function resolveSlackNativeStreaming(
     return params.streaming;
   }
   return true;
-}
-
-export function formatSlackStreamModeMigrationMessage(
-  pathPrefix: string,
-  resolvedStreaming: string,
-): string {
-  return `Moved ${pathPrefix}.streamMode → ${pathPrefix}.streaming (${resolvedStreaming}).`;
-}
-
-export function formatSlackStreamingBooleanMigrationMessage(
-  pathPrefix: string,
-  resolvedNativeStreaming: boolean,
-): string {
-  return `Moved ${pathPrefix}.streaming (boolean) → ${pathPrefix}.nativeStreaming (${resolvedNativeStreaming}).`;
 }

@@ -20,25 +20,6 @@ type BrowserRequestParams = {
   timeoutMs?: number;
 };
 
-function resolveRequestedProfile(params: {
-  query?: Record<string, unknown>;
-  body?: unknown;
-}): string | undefined {
-  const queryProfile =
-    typeof params.query?.profile === "string" ? params.query.profile.trim() : undefined;
-  if (queryProfile) {
-    return queryProfile;
-  }
-  if (!params.body || typeof params.body !== "object") {
-    return undefined;
-  }
-  const bodyProfile =
-    "profile" in params.body && typeof params.body.profile === "string"
-      ? params.body.profile.trim()
-      : undefined;
-  return bodyProfile || undefined;
-}
-
 type BrowserProxyFile = {
   path: string;
   base64: string;
@@ -206,7 +187,7 @@ export const browserHandlers: GatewayRequestHandlers = {
         query,
         body,
         timeoutMs,
-        profile: resolveRequestedProfile({ query, body }),
+        profile: typeof query?.profile === "string" ? query.profile : undefined,
       };
       const res = await context.nodeRegistry.invoke({
         nodeId: nodeTarget.nodeId,

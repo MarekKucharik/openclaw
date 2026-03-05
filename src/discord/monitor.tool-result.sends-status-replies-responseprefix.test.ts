@@ -158,7 +158,6 @@ describe("discord tool result dispatch", () => {
       client,
     );
 
-    await vi.waitFor(() => expect(dispatchMock).toHaveBeenCalledTimes(1));
     expect(capturedCtx?.SessionKey).toBe("agent:main:discord:channel:c1");
   });
 
@@ -182,7 +181,6 @@ describe("discord tool result dispatch", () => {
       client,
     );
 
-    await vi.waitFor(() => expect(dispatchMock).toHaveBeenCalledTimes(1));
     expect(capturedBody).toContain("Ada (Ada#1234): hello");
   });
 

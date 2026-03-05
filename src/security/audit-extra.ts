@@ -35,6 +35,5 @@ export {
   collectPluginsCodeSafetyFindings,
   collectPluginsTrustFindings,
   collectStateDeepFilesystemFindings,
-  collectWorkspaceSkillSymlinkEscapeFindings,
   readConfigSnapshotForAudit,
 } from "./audit-extra.async.js";

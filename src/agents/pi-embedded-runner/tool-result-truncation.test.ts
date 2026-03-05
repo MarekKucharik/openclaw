@@ -1,5 +1,4 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 import {
   truncateToolResultText,
@@ -12,46 +11,41 @@ import {
   HARD_MAX_TOOL_RESULT_CHARS,
 } from "./tool-result-truncation.js";
 
-let testTimestamp = 1;
-const nextTimestamp = () => testTimestamp++;
-
-function makeToolResult(text: string, toolCallId = "call_1"): ToolResultMessage {
+function makeToolResult(text: string, toolCallId = "call_1"): AgentMessage {
   return {
     role: "toolResult",
     toolCallId,
     toolName: "read",
     content: [{ type: "text", text }],
     isError: false,
-    timestamp: nextTimestamp(),
-  };
+    timestamp: Date.now(),
+  } as unknown as AgentMessage;
 }
 
-function makeUserMessage(text: string): UserMessage {
+function makeUserMessage(text: string): AgentMessage {
   return {
     role: "user",
     content: text,
-    timestamp: nextTimestamp(),
-  };
+    timestamp: Date.now(),
+  } as unknown as AgentMessage;
 }
 
-function makeAssistantMessage(text: string): AssistantMessage {
+function makeAssistantMessage(text: string): AgentMessage {
   return {
     role: "assistant",
     content: [{ type: "text", text }],
-    api: "openai-responses",
-    provider: "openai",
-    model: "gpt-5.2",
+    api: "messages",
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
     usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
     },
-    stopReason: "stop",
-    timestamp: nextTimestamp(),
-  };
+    stopReason: "end_turn",
+    timestamp: Date.now(),
+  } as unknown as AgentMessage;
 }
 
 describe("truncateToolResultText", () => {
@@ -104,18 +98,14 @@ describe("truncateToolResultText", () => {
 
 describe("getToolResultTextLength", () => {
   it("sums all text blocks in tool results", () => {
-    const msg: ToolResultMessage = {
+    const msg = {
       role: "toolResult",
-      toolCallId: "call_1",
-      toolName: "read",
-      isError: false,
       content: [
         { type: "text", text: "abc" },
-        { type: "image", data: "x", mimeType: "image/png" },
+        { type: "image", source: { type: "base64", mediaType: "image/png", data: "x" } },
         { type: "text", text: "12345" },
       ],
-      timestamp: nextTimestamp(),
-    };
+    } as unknown as AgentMessage;
 
     expect(getToolResultTextLength(msg)).toBe(8);
   });
@@ -127,29 +117,21 @@ describe("getToolResultTextLength", () => {
 
 describe("truncateToolResultMessage", () => {
   it("truncates with a custom suffix", () => {
-    const msg: ToolResultMessage = {
+    const msg = {
       role: "toolResult",
       toolCallId: "call_1",
       toolName: "read",
       content: [{ type: "text", text: "x".repeat(50_000) }],
       isError: false,
-      timestamp: nextTimestamp(),
-    };
+      timestamp: Date.now(),
+    } as unknown as AgentMessage;
 
     const result = truncateToolResultMessage(msg, 10_000, {
       suffix: "\n\n[persist-truncated]",
       minKeepChars: 2_000,
-    });
-    expect(result.role).toBe("toolResult");
-    if (result.role !== "toolResult") {
-      throw new Error("expected toolResult");
-    }
+    }) as { content: Array<{ type: string; text: string }> };
 
-    const firstBlock = result.content[0];
-    expect(firstBlock?.type).toBe("text");
-    expect(firstBlock && "text" in firstBlock ? firstBlock.text : "").toContain(
-      "[persist-truncated]",
-    );
+    expect(result.content[0]?.text).toContain("[persist-truncated]");
   });
 });
 
@@ -207,7 +189,7 @@ describe("truncateOversizedToolResultsInMessages", () => {
 
   it("truncates oversized tool results", () => {
     const bigContent = "x".repeat(500_000);
-    const messages: AgentMessage[] = [
+    const messages = [
       makeUserMessage("hello"),
       makeAssistantMessage("reading file"),
       makeToolResult(bigContent),
@@ -217,14 +199,9 @@ describe("truncateOversizedToolResultsInMessages", () => {
       128_000,
     );
     expect(truncatedCount).toBe(1);
-    const toolResult = result[2];
-    expect(toolResult?.role).toBe("toolResult");
-    const firstBlock =
-      toolResult && toolResult.role === "toolResult" ? toolResult.content[0] : undefined;
-    expect(firstBlock?.type).toBe("text");
-    const text = firstBlock && "text" in firstBlock ? firstBlock.text : "";
-    expect(text.length).toBeLessThan(bigContent.length);
-    expect(text).toContain("truncated");
+    const toolResult = result[2] as { content: Array<{ text: string }> };
+    expect(toolResult.content[0].text.length).toBeLessThan(bigContent.length);
+    expect(toolResult.content[0].text).toContain("truncated");
   });
 
   it("preserves non-toolResult messages", () => {
@@ -239,7 +216,7 @@ describe("truncateOversizedToolResultsInMessages", () => {
   });
 
   it("handles multiple oversized tool results", () => {
-    const messages: AgentMessage[] = [
+    const messages = [
       makeUserMessage("hello"),
       makeAssistantMessage("reading files"),
       makeToolResult("x".repeat(500_000), "call_1"),
@@ -251,10 +228,8 @@ describe("truncateOversizedToolResultsInMessages", () => {
     );
     expect(truncatedCount).toBe(2);
     for (const msg of result.slice(2)) {
-      expect(msg.role).toBe("toolResult");
-      const firstBlock = msg.role === "toolResult" ? msg.content[0] : undefined;
-      const text = firstBlock && "text" in firstBlock ? firstBlock.text : "";
-      expect(text.length).toBeLessThan(500_000);
+      const tr = msg as { content: Array<{ text: string }> };
+      expect(tr.content[0].text.length).toBeLessThan(500_000);
     }
   });
 });
@@ -287,27 +262,5 @@ describe("sessionLikelyHasOversizedToolResults", () => {
         contextWindowTokens: 200_000,
       }),
     ).toBe(false);
-  });
-});
-
-describe("truncateToolResultText head+tail strategy", () => {
-  it("preserves error content at the tail when present", () => {
-    const head = "Line 1\n".repeat(500);
-    const middle = "data data data\n".repeat(500);
-    const tail = "\nError: something failed\nStack trace: at foo.ts:42\n";
-    const text = head + middle + tail;
-    const result = truncateToolResultText(text, 5000);
-    // Should contain both the beginning and the error at the end
-    expect(result).toContain("Line 1");
-    expect(result).toContain("Error: something failed");
-    expect(result).toContain("middle content omitted");
-  });
-
-  it("uses simple head truncation when tail has no important content", () => {
-    const text = "normal line\n".repeat(1000);
-    const result = truncateToolResultText(text, 5000);
-    expect(result).toContain("normal line");
-    expect(result).not.toContain("middle content omitted");
-    expect(result).toContain("truncated");
   });
 });

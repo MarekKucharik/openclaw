@@ -32,13 +32,8 @@ const SENTINEL_FAST_RE = new RegExp(
     .join("|"),
 );
 
-function isInboundMetaSentinelLine(line: string): boolean {
-  const trimmed = line.trim();
-  return INBOUND_META_SENTINELS.some((sentinel) => sentinel === trimmed);
-}
-
 function shouldStripTrailingUntrustedContext(lines: string[], index: number): boolean {
-  if (lines[index]?.trim() !== UNTRUSTED_CONTEXT_HEADER) {
+  if (!lines[index]?.startsWith(UNTRUSTED_CONTEXT_HEADER)) {
     return false;
   }
   const probe = lines.slice(index + 1, Math.min(lines.length, index + 8)).join("\n");
@@ -94,12 +89,7 @@ export function stripInboundMetadata(text: string): string {
     }
 
     // Detect start of a metadata block.
-    if (!inMetaBlock && isInboundMetaSentinelLine(line)) {
-      const next = lines[i + 1];
-      if (next?.trim() !== "```json") {
-        result.push(line);
-        continue;
-      }
+    if (!inMetaBlock && INBOUND_META_SENTINELS.some((s) => line.startsWith(s))) {
       inMetaBlock = true;
       inFencedJson = false;
       continue;
@@ -146,14 +136,14 @@ export function stripLeadingInboundMetadata(text: string): string {
     return "";
   }
 
-  if (!isInboundMetaSentinelLine(lines[index])) {
+  if (!INBOUND_META_SENTINELS.some((s) => lines[index].startsWith(s))) {
     const strippedNoLeading = stripTrailingUntrustedContextSuffix(lines);
     return strippedNoLeading.join("\n");
   }
 
   while (index < lines.length) {
     const line = lines[index];
-    if (!isInboundMetaSentinelLine(line)) {
+    if (!INBOUND_META_SENTINELS.some((s) => line.startsWith(s))) {
       break;
     }
 

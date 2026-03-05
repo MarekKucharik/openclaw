@@ -79,27 +79,29 @@ export function countActiveRunsForSessionFromRuns(
   return count;
 }
 
-function forEachDescendantRun(
+export function countActiveDescendantRunsFromRuns(
   runs: Map<string, SubagentRunRecord>,
   rootSessionKey: string,
-  visitor: (runId: string, entry: SubagentRunRecord) => void,
-): boolean {
+): number {
   const root = rootSessionKey.trim();
   if (!root) {
-    return false;
+    return 0;
   }
   const pending = [root];
   const visited = new Set<string>([root]);
-  for (let index = 0; index < pending.length; index += 1) {
-    const requester = pending[index];
+  let count = 0;
+  while (pending.length > 0) {
+    const requester = pending.shift();
     if (!requester) {
       continue;
     }
-    for (const [runId, entry] of runs.entries()) {
+    for (const entry of runs.values()) {
       if (entry.requesterSessionKey !== requester) {
         continue;
       }
-      visitor(runId, entry);
+      if (typeof entry.endedAt !== "number") {
+        count += 1;
+      }
       const childKey = entry.childSessionKey.trim();
       if (!childKey || visited.has(childKey)) {
         continue;
@@ -108,73 +110,37 @@ function forEachDescendantRun(
       pending.push(childKey);
     }
   }
-  return true;
-}
-
-export function countActiveDescendantRunsFromRuns(
-  runs: Map<string, SubagentRunRecord>,
-  rootSessionKey: string,
-): number {
-  let count = 0;
-  if (
-    !forEachDescendantRun(runs, rootSessionKey, (_runId, entry) => {
-      if (typeof entry.endedAt !== "number") {
-        count += 1;
-      }
-    })
-  ) {
-    return 0;
-  }
   return count;
-}
-
-function countPendingDescendantRunsInternal(
-  runs: Map<string, SubagentRunRecord>,
-  rootSessionKey: string,
-  excludeRunId?: string,
-): number {
-  const excludedRunId = excludeRunId?.trim();
-  let count = 0;
-  if (
-    !forEachDescendantRun(runs, rootSessionKey, (runId, entry) => {
-      const runEnded = typeof entry.endedAt === "number";
-      const cleanupCompleted = typeof entry.cleanupCompletedAt === "number";
-      if ((!runEnded || !cleanupCompleted) && runId !== excludedRunId) {
-        count += 1;
-      }
-    })
-  ) {
-    return 0;
-  }
-  return count;
-}
-
-export function countPendingDescendantRunsFromRuns(
-  runs: Map<string, SubagentRunRecord>,
-  rootSessionKey: string,
-): number {
-  return countPendingDescendantRunsInternal(runs, rootSessionKey);
-}
-
-export function countPendingDescendantRunsExcludingRunFromRuns(
-  runs: Map<string, SubagentRunRecord>,
-  rootSessionKey: string,
-  excludeRunId: string,
-): number {
-  return countPendingDescendantRunsInternal(runs, rootSessionKey, excludeRunId);
 }
 
 export function listDescendantRunsForRequesterFromRuns(
   runs: Map<string, SubagentRunRecord>,
   rootSessionKey: string,
 ): SubagentRunRecord[] {
-  const descendants: SubagentRunRecord[] = [];
-  if (
-    !forEachDescendantRun(runs, rootSessionKey, (_runId, entry) => {
-      descendants.push(entry);
-    })
-  ) {
+  const root = rootSessionKey.trim();
+  if (!root) {
     return [];
+  }
+  const pending = [root];
+  const visited = new Set<string>([root]);
+  const descendants: SubagentRunRecord[] = [];
+  while (pending.length > 0) {
+    const requester = pending.shift();
+    if (!requester) {
+      continue;
+    }
+    for (const entry of runs.values()) {
+      if (entry.requesterSessionKey !== requester) {
+        continue;
+      }
+      descendants.push(entry);
+      const childKey = entry.childSessionKey.trim();
+      if (!childKey || visited.has(childKey)) {
+        continue;
+      }
+      visited.add(childKey);
+      pending.push(childKey);
+    }
   }
   return descendants;
 }

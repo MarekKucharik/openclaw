@@ -21,8 +21,8 @@ export async function resolveCurrentDirectiveLevels(params: {
 }> {
   const resolvedDefaultThinkLevel =
     (params.sessionEntry?.thinkingLevel as ThinkLevel | undefined) ??
-    (await params.resolveDefaultThinkingLevel()) ??
-    (params.agentCfg?.thinkingDefault as ThinkLevel | undefined);
+    (params.agentCfg?.thinkingDefault as ThinkLevel | undefined) ??
+    (await params.resolveDefaultThinkingLevel());
   const currentThinkLevel = resolvedDefaultThinkLevel;
   const currentVerboseLevel =
     (params.sessionEntry?.verboseLevel as VerboseLevel | undefined) ??

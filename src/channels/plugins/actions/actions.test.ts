@@ -61,11 +61,7 @@ type SignalActionInput = Parameters<NonNullable<typeof signalMessageActions.hand
 async function runSignalAction(
   action: SignalActionInput["action"],
   params: SignalActionInput["params"],
-  options?: {
-    cfg?: OpenClawConfig;
-    accountId?: string;
-    toolContext?: SignalActionInput["toolContext"];
-  },
+  options?: { cfg?: OpenClawConfig; accountId?: string },
 ) {
   const cfg =
     options?.cfg ?? ({ channels: { signal: { account: "+15550001111" } } } as OpenClawConfig);
@@ -79,7 +75,6 @@ async function runSignalAction(
     params,
     cfg,
     accountId: options?.accountId,
-    toolContext: options?.toolContext,
   });
   return { cfg };
 }
@@ -456,43 +451,6 @@ describe("handleDiscordMessageAction", () => {
       expect.objectContaining({ mediaLocalRoots: ["/tmp/agent-root"] }),
     );
   });
-
-  it("falls back to toolContext.currentMessageId for reactions when messageId is omitted", async () => {
-    await handleDiscordMessageAction({
-      action: "react",
-      params: {
-        channelId: "123",
-        emoji: "ok",
-      },
-      cfg: {} as OpenClawConfig,
-      toolContext: { currentMessageId: "9001" },
-    });
-
-    const call = handleDiscordAction.mock.calls.at(-1);
-    expect(call?.[0]).toEqual(
-      expect.objectContaining({
-        action: "react",
-        channelId: "123",
-        messageId: "9001",
-        emoji: "ok",
-      }),
-    );
-  });
-
-  it("rejects reactions when neither messageId nor toolContext.currentMessageId is provided", async () => {
-    await expect(
-      handleDiscordMessageAction({
-        action: "react",
-        params: {
-          channelId: "123",
-          emoji: "ok",
-        },
-        cfg: {} as OpenClawConfig,
-      }),
-    ).rejects.toThrow(/messageId required/i);
-
-    expect(handleDiscordAction).not.toHaveBeenCalled();
-  });
 });
 
 describe("telegramMessageActions", () => {
@@ -847,10 +805,7 @@ describe("signalMessageActions", () => {
         cfg: createSignalAccountOverrideCfg(),
         accountId: "work",
         params: { to: "+15550001111", messageId: "123", emoji: "👍" },
-        expectedRecipient: "+15550001111",
-        expectedTimestamp: 123,
-        expectedEmoji: "👍",
-        expectedOptions: { accountId: "work" },
+        expectedArgs: ["+15550001111", 123, "👍", { accountId: "work" }],
       },
       {
         name: "normalizes uuid recipients",
@@ -861,10 +816,7 @@ describe("signalMessageActions", () => {
           messageId: "123",
           emoji: "🔥",
         },
-        expectedRecipient: "123e4567-e89b-12d3-a456-426614174000",
-        expectedTimestamp: 123,
-        expectedEmoji: "🔥",
-        expectedOptions: {},
+        expectedArgs: ["123e4567-e89b-12d3-a456-426614174000", 123, "🔥", { accountId: undefined }],
       },
       {
         name: "passes groupId and targetAuthor for group reactions",
@@ -876,13 +828,17 @@ describe("signalMessageActions", () => {
           messageId: "123",
           emoji: "✅",
         },
-        expectedRecipient: "",
-        expectedTimestamp: 123,
-        expectedEmoji: "✅",
-        expectedOptions: {
-          groupId: "group-id",
-          targetAuthor: "uuid:123e4567-e89b-12d3-a456-426614174000",
-        },
+        expectedArgs: [
+          "",
+          123,
+          "✅",
+          {
+            accountId: undefined,
+            groupId: "group-id",
+            targetAuthor: "uuid:123e4567-e89b-12d3-a456-426614174000",
+            targetAuthorUuid: undefined,
+          },
+        ],
       },
     ] as const;
 
@@ -892,43 +848,8 @@ describe("signalMessageActions", () => {
         cfg: testCase.cfg,
         accountId: testCase.accountId,
       });
-      expect(sendReactionSignal, testCase.name).toHaveBeenCalledWith(
-        testCase.expectedRecipient,
-        testCase.expectedTimestamp,
-        testCase.expectedEmoji,
-        expect.objectContaining({
-          cfg: testCase.cfg,
-          ...testCase.expectedOptions,
-        }),
-      );
+      expect(sendReactionSignal, testCase.name).toHaveBeenCalledWith(...testCase.expectedArgs);
     }
-  });
-
-  it("falls back to toolContext.currentMessageId for reactions when messageId is omitted", async () => {
-    sendReactionSignal.mockClear();
-    await runSignalAction(
-      "react",
-      { to: "+15559999999", emoji: "🔥" },
-      { toolContext: { currentMessageId: "1737630212345" } },
-    );
-    expect(sendReactionSignal).toHaveBeenCalledTimes(1);
-    expect(sendReactionSignal).toHaveBeenCalledWith(
-      "+15559999999",
-      1737630212345,
-      "🔥",
-      expect.objectContaining({}),
-    );
-  });
-
-  it("rejects reaction when neither messageId nor toolContext.currentMessageId is provided", async () => {
-    const cfg = {
-      channels: { signal: { account: "+15550001111" } },
-    } as OpenClawConfig;
-    await expectSignalActionRejected(
-      { to: "+15559999999", emoji: "✅" },
-      /messageId.*required/,
-      cfg,
-    );
   });
 
   it("requires targetAuthor for group reactions", async () => {

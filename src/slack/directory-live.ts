@@ -36,7 +36,8 @@ type SlackListChannelsResponse = {
 
 function resolveReadToken(params: DirectoryConfigParams): string | undefined {
   const account = resolveSlackAccount({ cfg: params.cfg, accountId: params.accountId });
-  return account.userToken ?? account.botToken?.trim();
+  const userToken = account.config.userToken?.trim() || undefined;
+  return userToken ?? account.botToken?.trim();
 }
 
 function normalizeQuery(value?: string | null): string {

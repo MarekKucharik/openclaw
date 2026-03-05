@@ -2,15 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sendWebhookMessageDiscord } from "./send.js";
 
 const recordChannelActivityMock = vi.hoisted(() => vi.fn());
-const loadConfigMock = vi.hoisted(() => vi.fn(() => ({ channels: { discord: {} } })));
-
-vi.mock("../config/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../config/config.js")>();
-  return {
-    ...actual,
-    loadConfig: () => loadConfigMock(),
-  };
-});
 
 vi.mock("../infra/channel-activity.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../infra/channel-activity.js")>();
@@ -23,7 +14,6 @@ vi.mock("../infra/channel-activity.js", async (importOriginal) => {
 describe("sendWebhookMessageDiscord activity", () => {
   beforeEach(() => {
     recordChannelActivityMock.mockClear();
-    loadConfigMock.mockClear();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -40,15 +30,7 @@ describe("sendWebhookMessageDiscord activity", () => {
   });
 
   it("records outbound channel activity for webhook sends", async () => {
-    const cfg = {
-      channels: {
-        discord: {
-          token: "resolved-token",
-        },
-      },
-    };
     const result = await sendWebhookMessageDiscord("hello world", {
-      cfg,
       webhookId: "wh-1",
       webhookToken: "tok-1",
       accountId: "runtime",
@@ -64,6 +46,5 @@ describe("sendWebhookMessageDiscord activity", () => {
       accountId: "runtime",
       direction: "outbound",
     });
-    expect(loadConfigMock).not.toHaveBeenCalled();
   });
 });

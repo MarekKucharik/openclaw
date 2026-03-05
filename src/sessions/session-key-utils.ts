@@ -5,14 +5,10 @@ export type ParsedAgentSessionKey = {
 
 export type SessionKeyChatType = "direct" | "group" | "channel" | "unknown";
 
-/**
- * Parse agent-scoped session keys in a canonical, case-insensitive way.
- * Returned values are normalized to lowercase for stable comparisons/routing.
- */
 export function parseAgentSessionKey(
   sessionKey: string | undefined | null,
 ): ParsedAgentSessionKey | null {
-  const raw = (sessionKey ?? "").trim().toLowerCase();
+  const raw = (sessionKey ?? "").trim();
   if (!raw) {
     return null;
   }

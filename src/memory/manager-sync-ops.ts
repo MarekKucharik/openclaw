@@ -13,7 +13,6 @@ import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { resolveUserPath } from "../utils.js";
 import { DEFAULT_GEMINI_EMBEDDING_MODEL } from "./embeddings-gemini.js";
 import { DEFAULT_MISTRAL_EMBEDDING_MODEL } from "./embeddings-mistral.js";
-import { DEFAULT_OLLAMA_EMBEDDING_MODEL } from "./embeddings-ollama.js";
 import { DEFAULT_OPENAI_EMBEDDING_MODEL } from "./embeddings-openai.js";
 import { DEFAULT_VOYAGE_EMBEDDING_MODEL } from "./embeddings-voyage.js";
 import {
@@ -21,7 +20,6 @@ import {
   type EmbeddingProvider,
   type GeminiEmbeddingClient,
   type MistralEmbeddingClient,
-  type OllamaEmbeddingClient,
   type OpenAiEmbeddingClient,
   type VoyageEmbeddingClient,
 } from "./embeddings.js";
@@ -93,12 +91,11 @@ export abstract class MemoryManagerSyncOps {
   protected abstract readonly workspaceDir: string;
   protected abstract readonly settings: ResolvedMemorySearchConfig;
   protected provider: EmbeddingProvider | null = null;
-  protected fallbackFrom?: "openai" | "local" | "gemini" | "voyage" | "mistral" | "ollama";
+  protected fallbackFrom?: "openai" | "local" | "gemini" | "voyage" | "mistral";
   protected openAi?: OpenAiEmbeddingClient;
   protected gemini?: GeminiEmbeddingClient;
   protected voyage?: VoyageEmbeddingClient;
   protected mistral?: MistralEmbeddingClient;
-  protected ollama?: OllamaEmbeddingClient;
   protected abstract batch: {
     enabled: boolean;
     wait: boolean;
@@ -136,7 +133,6 @@ export abstract class MemoryManagerSyncOps {
     string,
     { lastSize: number; pendingBytes: number; pendingMessages: number }
   >();
-  private lastMetaSerialized: string | null = null;
 
   protected abstract readonly cache: { enabled: boolean; maxEntries?: number };
   protected abstract db: DatabaseSync;
@@ -353,10 +349,7 @@ export abstract class MemoryManagerSyncOps {
     this.fts.available = result.ftsAvailable;
     if (result.ftsError) {
       this.fts.loadError = result.ftsError;
-      // Only warn when hybrid search is enabled; otherwise this is expected noise.
-      if (this.fts.enabled) {
-        log.warn(`fts unavailable: ${result.ftsError}`);
-      }
+      log.warn(`fts unavailable: ${result.ftsError}`);
     }
   }
 
@@ -964,13 +957,7 @@ export abstract class MemoryManagerSyncOps {
     if (this.fallbackFrom) {
       return false;
     }
-    const fallbackFrom = this.provider.id as
-      | "openai"
-      | "gemini"
-      | "local"
-      | "voyage"
-      | "mistral"
-      | "ollama";
+    const fallbackFrom = this.provider.id as "openai" | "gemini" | "local" | "voyage" | "mistral";
 
     const fallbackModel =
       fallback === "gemini"
@@ -981,9 +968,7 @@ export abstract class MemoryManagerSyncOps {
             ? DEFAULT_VOYAGE_EMBEDDING_MODEL
             : fallback === "mistral"
               ? DEFAULT_MISTRAL_EMBEDDING_MODEL
-              : fallback === "ollama"
-                ? DEFAULT_OLLAMA_EMBEDDING_MODEL
-                : this.settings.model;
+              : this.settings.model;
 
     const fallbackResult = await createEmbeddingProvider({
       config: this.cfg,
@@ -1002,7 +987,6 @@ export abstract class MemoryManagerSyncOps {
     this.gemini = fallbackResult.gemini;
     this.voyage = fallbackResult.voyage;
     this.mistral = fallbackResult.mistral;
-    this.ollama = fallbackResult.ollama;
     this.providerKey = this.computeProviderKey();
     this.batch = this.resolveBatchConfig();
     log.warn(`memory embeddings: switched to fallback provider (${fallback})`, { reason });
@@ -1182,30 +1166,22 @@ export abstract class MemoryManagerSyncOps {
       | { value: string }
       | undefined;
     if (!row?.value) {
-      this.lastMetaSerialized = null;
       return null;
     }
     try {
-      const parsed = JSON.parse(row.value) as MemoryIndexMeta;
-      this.lastMetaSerialized = row.value;
-      return parsed;
+      return JSON.parse(row.value) as MemoryIndexMeta;
     } catch {
-      this.lastMetaSerialized = null;
       return null;
     }
   }
 
   protected writeMeta(meta: MemoryIndexMeta) {
     const value = JSON.stringify(meta);
-    if (this.lastMetaSerialized === value) {
-      return;
-    }
     this.db
       .prepare(
         `INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
       )
       .run(META_KEY, value);
-    this.lastMetaSerialized = value;
   }
 
   private resolveConfiguredSourcesForMeta(): MemorySource[] {

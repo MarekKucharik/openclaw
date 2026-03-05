@@ -15,9 +15,8 @@ import { createTelegramRetryRunner } from "../infra/retry-policy.js";
 import type { RetryConfig } from "../infra/retry.js";
 import { redactSensitiveText } from "../logging/redact.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import type { MediaKind } from "../media/constants.js";
-import { buildOutboundMediaLoadOptions } from "../media/load-options.js";
-import { isGifMedia, kindFromMime } from "../media/mime.js";
+import { mediaKindFromMime } from "../media/constants.js";
+import { isGifMedia } from "../media/mime.js";
 import { normalizePollInput, type PollInput } from "../polls.js";
 import { loadWebMedia } from "../web/media.js";
 import { type ResolvedTelegramAccount, resolveTelegramAccount } from "./accounts.js";
@@ -42,7 +41,6 @@ type TelegramApi = Bot["api"];
 type TelegramApiOverride = Partial<TelegramApi>;
 
 type TelegramSendOpts = {
-  cfg?: ReturnType<typeof loadConfig>;
   token?: string;
   accountId?: string;
   verbose?: boolean;
@@ -560,14 +558,11 @@ export async function sendMessageTelegram(
   };
 
   if (mediaUrl) {
-    const media = await loadWebMedia(
-      mediaUrl,
-      buildOutboundMediaLoadOptions({
-        maxBytes: opts.maxBytes,
-        mediaLocalRoots: opts.mediaLocalRoots,
-      }),
-    );
-    const kind = kindFromMime(media.contentType ?? undefined);
+    const media = await loadWebMedia(mediaUrl, {
+      maxBytes: opts.maxBytes,
+      localRoots: opts.mediaLocalRoots,
+    });
+    const kind = mediaKindFromMime(media.contentType ?? undefined);
     const isGif = isGifMedia({
       contentType: media.contentType,
       fileName: media.fileName,
@@ -945,7 +940,7 @@ export async function editMessageTelegram(
   return { ok: true, messageId: String(messageId), chatId };
 }
 
-function inferFilename(kind: MediaKind) {
+function inferFilename(kind: ReturnType<typeof mediaKindFromMime>) {
   switch (kind) {
     case "image":
       return "image.jpg";
@@ -1039,7 +1034,6 @@ export async function sendStickerTelegram(
 }
 
 type TelegramPollOpts = {
-  cfg?: ReturnType<typeof loadConfig>;
   token?: string;
   accountId?: string;
   verbose?: boolean;

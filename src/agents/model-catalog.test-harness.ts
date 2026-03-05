@@ -31,7 +31,6 @@ export function mockCatalogImportFailThenRecover() {
       throw new Error("boom");
     }
     return {
-      discoverAuthStorage: () => ({}),
       AuthStorage: class {},
       ModelRegistry: class {
         getAll() {

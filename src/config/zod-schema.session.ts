@@ -64,8 +64,7 @@ export const SessionSchema = z
     threadBindings: z
       .object({
         enabled: z.boolean().optional(),
-        idleHours: z.number().nonnegative().optional(),
-        maxAgeHours: z.number().nonnegative().optional(),
+        ttlHours: z.number().nonnegative().optional(),
       })
       .strict()
       .optional(),
@@ -152,9 +151,7 @@ export const MessagesSchema = z
     queue: QueueSchema,
     inbound: InboundDebounceSchema,
     ackReaction: z.string().optional(),
-    ackReactionScope: z
-      .enum(["group-mentions", "group-all", "direct", "all", "off", "none"])
-      .optional(),
+    ackReactionScope: z.enum(["group-mentions", "group-all", "direct", "all"]).optional(),
     removeAckAfterReply: z.boolean().optional(),
     statusReactions: z
       .object({

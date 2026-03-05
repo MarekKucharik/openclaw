@@ -16,14 +16,19 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { buildChannelAccountBindings } from "../../routing/bindings.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
-import { type GatewayClientMode, type GatewayClientName } from "../../utils/message-channel.js";
+import {
+  isDeliverableMessageChannel,
+  normalizeMessageChannel,
+  type GatewayClientMode,
+  type GatewayClientName,
+} from "../../utils/message-channel.js";
 import { throwIfAborted } from "./abort.js";
 import {
   listConfiguredMessageChannels,
   resolveMessageChannelSelection,
 } from "./channel-selection.js";
+import { applyTargetToParams } from "./channel-target.js";
 import type { OutboundSendDeps } from "./deliver.js";
-import { normalizeMessageActionInput } from "./message-action-normalization.js";
 import {
   hydrateAttachmentParamsForAction,
   normalizeSandboxMediaList,
@@ -36,6 +41,7 @@ import {
   resolveSlackAutoThreadId,
   resolveTelegramAutoThreadId,
 } from "./message-action-params.js";
+import { actionHasTarget, actionRequiresTarget } from "./message-action-spec.js";
 import type { MessagePollResult, MessageSendResult } from "./message.js";
 import {
   applyCrossContextDecoration,
@@ -211,19 +217,12 @@ async function maybeApplyCrossContextMarker(params: {
   });
 }
 
-async function resolveChannel(
-  cfg: OpenClawConfig,
-  params: Record<string, unknown>,
-  toolContext?: { currentChannelProvider?: string },
-) {
+async function resolveChannel(cfg: OpenClawConfig, params: Record<string, unknown>) {
+  const channelHint = readStringParam(params, "channel");
   const selection = await resolveMessageChannelSelection({
     cfg,
-    channel: readStringParam(params, "channel"),
-    fallbackChannel: toolContext?.currentChannelProvider,
+    channel: channelHint,
   });
-  if (selection.source === "tool-context-fallback") {
-    params.channel = selection.channel;
-  }
   return selection.channel;
 }
 
@@ -318,7 +317,7 @@ async function handleBroadcastAction(
   }
   const targetChannels =
     channelHint && channelHint.trim().toLowerCase() !== "all"
-      ? [await resolveChannel(input.cfg, { channel: channelHint }, input.toolContext)]
+      ? [await resolveChannel(input.cfg, { channel: channelHint })]
       : configured;
   const results: Array<{
     channel: ChannelId;
@@ -478,6 +477,8 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
   const gifPlayback = readBooleanParam(params, "gifPlayback") ?? false;
   const bestEffort = readBooleanParam(params, "bestEffort");
   const silent = readBooleanParam(params, "silent");
+  const mentions = readStringArrayParam(params, "mentions") ?? undefined;
+  const mentionAll = readBooleanParam(params, "mentionAll") ?? undefined;
 
   const replyToId = readStringParam(params, "replyTo");
   const resolvedThreadId = resolveAndApplyOutboundThreadId(params, {
@@ -545,6 +546,8 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     mediaUrl: mediaUrl || undefined,
     mediaUrls: mergedMediaUrls.length ? mergedMediaUrls : undefined,
     gifPlayback,
+    mentions,
+    mentionAll: mentionAll ?? undefined,
     bestEffort: bestEffort ?? undefined,
     replyToId: replyToId ?? undefined,
     threadId: resolvedThreadId ?? undefined,
@@ -696,7 +699,7 @@ export async function runMessageAction(
   input: RunMessageActionParams,
 ): Promise<MessageActionRunResult> {
   const cfg = input.cfg;
-  let params = { ...input.params };
+  const params = { ...input.params };
   const resolvedAgentId =
     input.agentId ??
     (input.sessionKey
@@ -710,13 +713,52 @@ export async function runMessageAction(
   if (action === "broadcast") {
     return handleBroadcastAction(input, params);
   }
-  params = normalizeMessageActionInput({
-    action,
-    args: params,
-    toolContext: input.toolContext,
-  });
 
-  const channel = await resolveChannel(cfg, params, input.toolContext);
+  const explicitTarget = typeof params.target === "string" ? params.target.trim() : "";
+  const hasLegacyTarget =
+    (typeof params.to === "string" && params.to.trim().length > 0) ||
+    (typeof params.channelId === "string" && params.channelId.trim().length > 0);
+  if (explicitTarget && hasLegacyTarget) {
+    delete params.to;
+    delete params.channelId;
+  }
+  if (
+    !explicitTarget &&
+    !hasLegacyTarget &&
+    actionRequiresTarget(action) &&
+    !actionHasTarget(action, params)
+  ) {
+    const inferredTarget = input.toolContext?.currentChannelId?.trim();
+    if (inferredTarget) {
+      params.target = inferredTarget;
+    }
+  }
+  if (!explicitTarget && actionRequiresTarget(action) && hasLegacyTarget) {
+    const legacyTo = typeof params.to === "string" ? params.to.trim() : "";
+    const legacyChannelId = typeof params.channelId === "string" ? params.channelId.trim() : "";
+    const legacyTarget = legacyTo || legacyChannelId;
+    if (legacyTarget) {
+      params.target = legacyTarget;
+      delete params.to;
+      delete params.channelId;
+    }
+  }
+  const explicitChannel = typeof params.channel === "string" ? params.channel.trim() : "";
+  if (!explicitChannel) {
+    const inferredChannel = normalizeMessageChannel(input.toolContext?.currentChannelProvider);
+    if (inferredChannel && isDeliverableMessageChannel(inferredChannel)) {
+      params.channel = inferredChannel;
+    }
+  }
+
+  applyTargetToParams({ action, args: params });
+  if (actionRequiresTarget(action)) {
+    if (!actionHasTarget(action, params)) {
+      throw new Error(`Action ${action} requires a target.`);
+    }
+  }
+
+  const channel = await resolveChannel(cfg, params);
   let accountId = readStringParam(params, "accountId") ?? input.defaultAccountId;
   if (!accountId && resolvedAgentId) {
     const byAgent = buildChannelAccountBindings(cfg).get(channel);

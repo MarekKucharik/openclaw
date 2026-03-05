@@ -88,6 +88,8 @@ export async function executeSendAction(params: {
   mediaUrl?: string;
   mediaUrls?: string[];
   gifPlayback?: boolean;
+  mentions?: string[];
+  mentionAll?: boolean;
   bestEffort?: boolean;
   replyToId?: string;
   threadId?: string | number;
@@ -135,6 +137,8 @@ export async function executeSendAction(params: {
     replyToId: params.replyToId,
     threadId: params.threadId,
     gifPlayback: params.gifPlayback,
+    mentions: params.mentions,
+    mentionAll: params.mentionAll,
     dryRun: params.ctx.dryRun,
     bestEffort: params.bestEffort ?? undefined,
     deps: params.ctx.deps,

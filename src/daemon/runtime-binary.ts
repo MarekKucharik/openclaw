@@ -1,24 +1,11 @@
-const NODE_VERSIONED_PATTERN = /^node(?:-\d+|\d+)(?:\.\d+)*(?:\.exe)?$/;
-
-function normalizeRuntimeBasename(execPath: string): string {
-  const trimmed = execPath.trim().replace(/^["']|["']$/g, "");
-  const lastSlash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
-  const basename = lastSlash === -1 ? trimmed : trimmed.slice(lastSlash + 1);
-  return basename.toLowerCase();
-}
+import path from "node:path";
 
 export function isNodeRuntime(execPath: string): boolean {
-  const base = normalizeRuntimeBasename(execPath);
-  return (
-    base === "node" ||
-    base === "node.exe" ||
-    base === "nodejs" ||
-    base === "nodejs.exe" ||
-    NODE_VERSIONED_PATTERN.test(base)
-  );
+  const base = path.basename(execPath).toLowerCase();
+  return base === "node" || base === "node.exe";
 }
 
 export function isBunRuntime(execPath: string): boolean {
-  const base = normalizeRuntimeBasename(execPath);
+  const base = path.basename(execPath).toLowerCase();
   return base === "bun" || base === "bun.exe";
 }

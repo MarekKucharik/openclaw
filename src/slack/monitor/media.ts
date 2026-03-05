@@ -108,11 +108,6 @@ export async function fetchWithSlackAuth(url: string, token: string): Promise<Re
   return fetch(resolvedUrl.toString(), { redirect: "follow" });
 }
 
-const SLACK_MEDIA_SSRF_POLICY = {
-  allowedHostnames: ["*.slack.com", "*.slack-edge.com", "*.slack-files.com"],
-  allowRfc2544BenchmarkRange: true,
-};
-
 /**
  * Slack voice messages (audio clips, huddle recordings) carry a `subtype` of
  * `"slack_audio"` but are served with a `video/*` MIME type (e.g. `video/mp4`,
@@ -128,11 +123,6 @@ function resolveSlackMediaMimetype(
     return mime.replace("video/", "audio/");
   }
   return mime;
-}
-
-function looksLikeHtmlBuffer(buffer: Buffer): boolean {
-  const head = buffer.subarray(0, 512).toString("utf-8").replace(/^\s+/, "").toLowerCase();
-  return head.startsWith("<!doctype html") || head.startsWith("<html");
 }
 
 export type SlackMediaResult = {
@@ -223,25 +213,10 @@ export async function resolveSlackMedia(params: {
           fetchImpl,
           filePathHint: file.name,
           maxBytes: params.maxBytes,
-          ssrfPolicy: SLACK_MEDIA_SSRF_POLICY,
         });
         if (fetched.buffer.byteLength > params.maxBytes) {
           return null;
         }
-
-        // Guard against auth/login HTML pages returned instead of binary media.
-        // Allow user-provided HTML files through.
-        const fileMime = file.mimetype?.toLowerCase();
-        const fileName = file.name?.toLowerCase() ?? "";
-        const isExpectedHtml =
-          fileMime === "text/html" || fileName.endsWith(".html") || fileName.endsWith(".htm");
-        if (!isExpectedHtml) {
-          const detectedMime = fetched.contentType?.split(";")[0]?.trim().toLowerCase();
-          if (detectedMime === "text/html" || looksLikeHtmlBuffer(fetched.buffer)) {
-            return null;
-          }
-        }
-
         const effectiveMime = resolveSlackMediaMimetype(file, fetched.contentType);
         const saved = await saveMediaBuffer(
           fetched.buffer,
@@ -298,12 +273,9 @@ export async function resolveSlackAttachmentContent(params: {
     const imageUrl = resolveForwardedAttachmentImageUrl(att);
     if (imageUrl) {
       try {
-        const fetchImpl = createSlackMediaFetch(params.token);
         const fetched = await fetchRemoteMedia({
           url: imageUrl,
-          fetchImpl,
           maxBytes: params.maxBytes,
-          ssrfPolicy: SLACK_MEDIA_SSRF_POLICY,
         });
         if (fetched.buffer.byteLength <= params.maxBytes) {
           const saved = await saveMediaBuffer(

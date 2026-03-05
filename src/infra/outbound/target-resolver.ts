@@ -258,14 +258,6 @@ async function getDirectoryEntries(params: {
   preferLiveOnMiss?: boolean;
 }): Promise<ChannelDirectoryEntry[]> {
   const signature = buildTargetResolverSignature(params.channel);
-  const listParams = {
-    cfg: params.cfg,
-    channel: params.channel,
-    accountId: params.accountId,
-    kind: params.kind,
-    query: params.query,
-    runtime: params.runtime,
-  };
   const cacheKey = buildDirectoryCacheKey({
     channel: params.channel,
     accountId: params.accountId,
@@ -278,7 +270,12 @@ async function getDirectoryEntries(params: {
     return cached;
   }
   const entries = await listDirectoryEntries({
-    ...listParams,
+    cfg: params.cfg,
+    channel: params.channel,
+    accountId: params.accountId,
+    kind: params.kind,
+    query: params.query,
+    runtime: params.runtime,
     source: "cache",
   });
   if (entries.length > 0 || !params.preferLiveOnMiss) {
@@ -293,30 +290,17 @@ async function getDirectoryEntries(params: {
     signature,
   });
   const liveEntries = await listDirectoryEntries({
-    ...listParams,
+    cfg: params.cfg,
+    channel: params.channel,
+    accountId: params.accountId,
+    kind: params.kind,
+    query: params.query,
+    runtime: params.runtime,
     source: "live",
   });
   directoryCache.set(liveKey, liveEntries, params.cfg);
   directoryCache.set(cacheKey, liveEntries, params.cfg);
   return liveEntries;
-}
-
-function buildNormalizedResolveResult(params: {
-  channel: ChannelId;
-  raw: string;
-  normalized: string;
-  kind: TargetResolveKind;
-}): ResolveMessagingTargetResult {
-  const directTarget = preserveTargetCase(params.channel, params.raw, params.normalized);
-  return {
-    ok: true,
-    target: {
-      to: directTarget,
-      kind: params.kind,
-      display: stripTargetPrefixes(params.raw),
-      source: "normalized",
-    },
-  };
 }
 
 function pickAmbiguousMatch(
@@ -388,12 +372,16 @@ export async function resolveMessagingTarget(params: {
     return false;
   };
   if (looksLikeTargetId()) {
-    return buildNormalizedResolveResult({
-      channel: params.channel,
-      raw,
-      normalized,
-      kind,
-    });
+    const directTarget = preserveTargetCase(params.channel, raw, normalized);
+    return {
+      ok: true,
+      target: {
+        to: directTarget,
+        kind,
+        display: stripTargetPrefixes(raw),
+        source: "normalized",
+      },
+    };
   }
   const query = stripTargetPrefixes(raw);
   const entries = await getDirectoryEntries({
@@ -446,12 +434,16 @@ export async function resolveMessagingTarget(params: {
     (params.channel === "bluebubbles" || params.channel === "imessage") &&
     /^\+?\d{6,}$/.test(query)
   ) {
-    return buildNormalizedResolveResult({
-      channel: params.channel,
-      raw,
-      normalized,
-      kind,
-    });
+    const directTarget = preserveTargetCase(params.channel, raw, normalized);
+    return {
+      ok: true,
+      target: {
+        to: directTarget,
+        kind,
+        display: stripTargetPrefixes(raw),
+        source: "normalized",
+      },
+    };
   }
 
   return {

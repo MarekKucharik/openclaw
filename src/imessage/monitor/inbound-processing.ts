@@ -20,10 +20,6 @@ import {
   resolveChannelGroupRequireMention,
 } from "../../config/group-policy.js";
 import { resolveAgentRoute } from "../../routing/resolve-route.js";
-import {
-  DM_GROUP_ACCESS_REASON,
-  resolveDmGroupAccessWithLists,
-} from "../../security/dm-policy-shared.js";
 import { truncateUtf16Safe } from "../../utils.js";
 import {
   formatIMessageChatTarget,
@@ -142,60 +138,72 @@ export function resolveIMessageInboundDecision(params: {
   }
 
   const groupId = isGroup ? groupIdCandidate : undefined;
-  const accessDecision = resolveDmGroupAccessWithLists({
-    isGroup,
-    dmPolicy: params.dmPolicy,
-    groupPolicy: params.groupPolicy,
-    allowFrom: params.allowFrom,
-    groupAllowFrom: params.groupAllowFrom,
-    storeAllowFrom: params.storeAllowFrom,
-    groupAllowFromFallbackToAllowFrom: false,
-    isSenderAllowed: (allowFrom) =>
-      isAllowedIMessageSender({
-        allowFrom,
-        sender,
-        chatId,
-        chatGuid,
-        chatIdentifier,
-      }),
-  });
-  const effectiveDmAllowFrom = accessDecision.effectiveAllowFrom;
-  const effectiveGroupAllowFrom = accessDecision.effectiveGroupAllowFrom;
+  const storeAllowFrom = params.dmPolicy === "allowlist" ? [] : params.storeAllowFrom;
+  const effectiveDmAllowFrom = Array.from(new Set([...params.allowFrom, ...storeAllowFrom]))
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  // Keep DM pairing-store authorization scoped to DMs; group access must come from explicit group allowlist config.
+  const effectiveGroupAllowFrom = Array.from(new Set(params.groupAllowFrom))
+    .map((v) => String(v).trim())
+    .filter(Boolean);
 
-  if (accessDecision.decision !== "allow") {
-    if (isGroup) {
-      if (accessDecision.reasonCode === DM_GROUP_ACCESS_REASON.GROUP_POLICY_DISABLED) {
-        params.logVerbose?.("Blocked iMessage group message (groupPolicy: disabled)");
-        return { kind: "drop", reason: "groupPolicy disabled" };
-      }
-      if (accessDecision.reasonCode === DM_GROUP_ACCESS_REASON.GROUP_POLICY_EMPTY_ALLOWLIST) {
+  if (isGroup) {
+    if (params.groupPolicy === "disabled") {
+      params.logVerbose?.("Blocked iMessage group message (groupPolicy: disabled)");
+      return { kind: "drop", reason: "groupPolicy disabled" };
+    }
+    if (params.groupPolicy === "allowlist") {
+      if (effectiveGroupAllowFrom.length === 0) {
         params.logVerbose?.(
           "Blocked iMessage group message (groupPolicy: allowlist, no groupAllowFrom)",
         );
         return { kind: "drop", reason: "groupPolicy allowlist (empty groupAllowFrom)" };
       }
-      if (accessDecision.reasonCode === DM_GROUP_ACCESS_REASON.GROUP_POLICY_NOT_ALLOWLISTED) {
+      const allowed = isAllowedIMessageSender({
+        allowFrom: effectiveGroupAllowFrom,
+        sender,
+        chatId,
+        chatGuid,
+        chatIdentifier,
+      });
+      if (!allowed) {
         params.logVerbose?.(`Blocked iMessage sender ${sender} (not in groupAllowFrom)`);
         return { kind: "drop", reason: "not in groupAllowFrom" };
       }
-      params.logVerbose?.(`Blocked iMessage group message (${accessDecision.reason})`);
-      return { kind: "drop", reason: accessDecision.reason };
     }
-    if (accessDecision.reasonCode === DM_GROUP_ACCESS_REASON.DM_POLICY_DISABLED) {
-      return { kind: "drop", reason: "dmPolicy disabled" };
+    if (groupListPolicy.allowlistEnabled && !groupListPolicy.allowed) {
+      params.logVerbose?.(
+        `imessage: skipping group message (${groupId ?? "unknown"}) not in allowlist`,
+      );
+      return { kind: "drop", reason: "group id not in allowlist" };
     }
-    if (accessDecision.decision === "pairing") {
-      return { kind: "pairing", senderId: senderNormalized };
-    }
-    params.logVerbose?.(`Blocked iMessage sender ${sender} (dmPolicy=${params.dmPolicy})`);
-    return { kind: "drop", reason: "dmPolicy blocked" };
   }
 
-  if (isGroup && groupListPolicy.allowlistEnabled && !groupListPolicy.allowed) {
-    params.logVerbose?.(
-      `imessage: skipping group message (${groupId ?? "unknown"}) not in allowlist`,
-    );
-    return { kind: "drop", reason: "group id not in allowlist" };
+  const dmHasWildcard = effectiveDmAllowFrom.includes("*");
+  const dmAuthorized =
+    params.dmPolicy === "open"
+      ? true
+      : dmHasWildcard ||
+        (effectiveDmAllowFrom.length > 0 &&
+          isAllowedIMessageSender({
+            allowFrom: effectiveDmAllowFrom,
+            sender,
+            chatId,
+            chatGuid,
+            chatIdentifier,
+          }));
+
+  if (!isGroup) {
+    if (params.dmPolicy === "disabled") {
+      return { kind: "drop", reason: "dmPolicy disabled" };
+    }
+    if (!dmAuthorized) {
+      if (params.dmPolicy === "pairing") {
+        return { kind: "pairing", senderId: senderNormalized };
+      }
+      params.logVerbose?.(`Blocked iMessage sender ${sender} (dmPolicy=${params.dmPolicy})`);
+      return { kind: "drop", reason: "dmPolicy blocked" };
+    }
   }
 
   const route = resolveAgentRoute({
@@ -255,11 +263,10 @@ export function resolveIMessageInboundDecision(params: {
   const canDetectMention = mentionRegexes.length > 0;
 
   const useAccessGroups = params.cfg.commands?.useAccessGroups !== false;
-  const commandDmAllowFrom = isGroup ? params.allowFrom : effectiveDmAllowFrom;
   const ownerAllowedForCommands =
-    commandDmAllowFrom.length > 0
+    effectiveDmAllowFrom.length > 0
       ? isAllowedIMessageSender({
-          allowFrom: commandDmAllowFrom,
+          allowFrom: effectiveDmAllowFrom,
           sender,
           chatId,
           chatGuid,
@@ -280,13 +287,13 @@ export function resolveIMessageInboundDecision(params: {
   const commandGate = resolveControlCommandGate({
     useAccessGroups,
     authorizers: [
-      { configured: commandDmAllowFrom.length > 0, allowed: ownerAllowedForCommands },
+      { configured: effectiveDmAllowFrom.length > 0, allowed: ownerAllowedForCommands },
       { configured: effectiveGroupAllowFrom.length > 0, allowed: groupAllowedForCommands },
     ],
     allowTextCommands: true,
     hasControlCommand: hasControlCommandInMessage,
   });
-  const commandAuthorized = commandGate.commandAuthorized;
+  const commandAuthorized = isGroup ? commandGate.commandAuthorized : dmAuthorized;
   if (isGroup && commandGate.shouldBlock) {
     if (params.logVerbose) {
       logInboundDrop({

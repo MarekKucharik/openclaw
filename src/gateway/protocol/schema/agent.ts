@@ -2,23 +2,6 @@ import { Type } from "@sinclair/typebox";
 import { INPUT_PROVENANCE_KIND_VALUES } from "../../../sessions/input-provenance.js";
 import { NonEmptyString, SessionLabelString } from "./primitives.js";
 
-export const AgentInternalEventSchema = Type.Object(
-  {
-    type: Type.Literal("task_completion"),
-    source: Type.String({ enum: ["subagent", "cron"] }),
-    childSessionKey: Type.String(),
-    childSessionId: Type.Optional(Type.String()),
-    announceType: Type.String(),
-    taskLabel: Type.String(),
-    status: Type.String({ enum: ["ok", "timeout", "error", "unknown"] }),
-    statusLabel: Type.String(),
-    result: Type.String(),
-    statsLine: Type.Optional(Type.String()),
-    replyInstruction: Type.String(),
-  },
-  { additionalProperties: false },
-);
-
 export const AgentEventSchema = Type.Object(
   {
     runId: NonEmptyString,
@@ -37,6 +20,8 @@ export const SendParamsSchema = Type.Object(
     mediaUrl: Type.Optional(Type.String()),
     mediaUrls: Type.Optional(Type.Array(Type.String())),
     gifPlayback: Type.Optional(Type.Boolean()),
+    mentions: Type.Optional(Type.Array(Type.String())),
+    mentionAll: Type.Optional(Type.Boolean()),
     channel: Type.Optional(Type.String()),
     accountId: Type.Optional(Type.String()),
     /** Optional agent id for per-agent media root resolution on gateway sends. */
@@ -95,7 +80,6 @@ export const AgentParamsSchema = Type.Object(
     bestEffortDeliver: Type.Optional(Type.Boolean()),
     lane: Type.Optional(Type.String()),
     extraSystemPrompt: Type.Optional(Type.String()),
-    internalEvents: Type.Optional(Type.Array(AgentInternalEventSchema)),
     inputProvenance: Type.Optional(
       Type.Object(
         {

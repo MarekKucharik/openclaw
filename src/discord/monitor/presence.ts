@@ -21,7 +21,7 @@ export function resolveDiscordPresenceUpdate(
   const hasStatus = Boolean(status);
 
   if (!hasActivity && !hasStatus) {
-    return { since: null, activities: [], status: "online", afk: false };
+    return null;
   }
 
   const activities: Activity[] = [];

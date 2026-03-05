@@ -1,6 +1,4 @@
 import { writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { WebSocket } from "ws";
 import {
   type DeviceIdentity,
@@ -17,7 +15,7 @@ import {
   type GatewayClientName,
 } from "../utils/message-channel.js";
 import { GatewayClient } from "./client.js";
-import { buildDeviceAuthPayloadV3 } from "./device-auth.js";
+import { buildDeviceAuthPayload } from "./device-auth.js";
 import { PROTOCOL_VERSION } from "./protocol/index.js";
 import { startGatewayServer } from "./server.js";
 
@@ -33,7 +31,6 @@ export async function connectGatewayClient(params: {
   clientVersion?: string;
   mode?: GatewayClientMode;
   platform?: string;
-  deviceFamily?: string;
   role?: "operator" | "node";
   scopes?: string[];
   caps?: string[];
@@ -45,20 +42,6 @@ export async function connectGatewayClient(params: {
   timeoutMs?: number;
   timeoutMessage?: string;
 }) {
-  const role = params.role ?? "operator";
-  const platform = params.platform ?? process.platform;
-  const identityRoot = process.env.OPENCLAW_STATE_DIR ?? process.env.HOME ?? os.tmpdir();
-  const deviceIdentity =
-    params.deviceIdentity ??
-    loadOrCreateDeviceIdentity(
-      (() => {
-        const safe =
-          `${params.clientName ?? GATEWAY_CLIENT_NAMES.TEST}-${params.mode ?? GATEWAY_CLIENT_MODES.TEST}-${platform}-${params.deviceFamily ?? "none"}-${role}`
-            .replace(/[^a-zA-Z0-9._-]+/g, "_")
-            .toLowerCase();
-        return path.join(identityRoot, "test-device-identities", `${safe}.json`);
-      })(),
-    );
   return await new Promise<InstanceType<typeof GatewayClient>>((resolve, reject) => {
     let settled = false;
     const stop = (err?: Error, client?: InstanceType<typeof GatewayClient>) => {
@@ -80,15 +63,14 @@ export async function connectGatewayClient(params: {
       clientName: params.clientName ?? GATEWAY_CLIENT_NAMES.TEST,
       clientDisplayName: params.clientDisplayName ?? "vitest",
       clientVersion: params.clientVersion ?? "dev",
-      platform,
-      deviceFamily: params.deviceFamily,
+      platform: params.platform,
       mode: params.mode ?? GATEWAY_CLIENT_MODES.TEST,
-      role,
+      role: params.role,
       scopes: params.scopes,
       caps: params.caps,
       commands: params.commands,
       instanceId: params.instanceId,
-      deviceIdentity,
+      deviceIdentity: params.deviceIdentity,
       onEvent: params.onEvent,
       onHelloOk: () => stop(undefined, client),
       onConnectError: (err) => stop(err),
@@ -145,8 +127,7 @@ export async function connectDeviceAuthReq(params: { url: string; token?: string
   const connectNonce = await connectNoncePromise;
   const identity = loadOrCreateDeviceIdentity();
   const signedAtMs = Date.now();
-  const platform = process.platform;
-  const payload = buildDeviceAuthPayloadV3({
+  const payload = buildDeviceAuthPayload({
     deviceId: identity.deviceId,
     clientId: GATEWAY_CLIENT_NAMES.TEST,
     clientMode: GATEWAY_CLIENT_MODES.TEST,
@@ -155,7 +136,6 @@ export async function connectDeviceAuthReq(params: { url: string; token?: string
     signedAtMs,
     token: params.token ?? null,
     nonce: connectNonce,
-    platform,
   });
   const device = {
     id: identity.deviceId,
@@ -176,7 +156,7 @@ export async function connectDeviceAuthReq(params: { url: string; token?: string
           id: GATEWAY_CLIENT_NAMES.TEST,
           displayName: "vitest",
           version: "dev",
-          platform,
+          platform: process.platform,
           mode: GATEWAY_CLIENT_MODES.TEST,
         },
         caps: [],

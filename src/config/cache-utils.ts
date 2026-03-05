@@ -18,18 +18,9 @@ export function isCacheEnabled(ttlMs: number): boolean {
   return ttlMs > 0;
 }
 
-export type FileStatSnapshot = {
-  mtimeMs: number;
-  sizeBytes: number;
-};
-
-export function getFileStatSnapshot(filePath: string): FileStatSnapshot | undefined {
+export function getFileMtimeMs(filePath: string): number | undefined {
   try {
-    const stats = fs.statSync(filePath);
-    return {
-      mtimeMs: stats.mtimeMs,
-      sizeBytes: stats.size,
-    };
+    return fs.statSync(filePath).mtimeMs;
   } catch {
     return undefined;
   }

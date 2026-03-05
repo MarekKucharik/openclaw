@@ -2,8 +2,6 @@ import fs from "node:fs";
 import {
   buildChannelAccountSnapshot,
   formatChannelAllowFrom,
-  resolveChannelAccountConfigured,
-  resolveChannelAccountEnabled,
 } from "../../channels/account-summary.js";
 import { resolveChannelDefaultAccountId } from "../../channels/plugins/helpers.js";
 import { listChannelPlugins } from "../../channels/plugins/index.js";
@@ -85,6 +83,30 @@ const formatAccountLabel = (params: { accountId: string; name?: string }) => {
     return `${base} (${params.name.trim()})`;
   }
   return base;
+};
+
+const resolveAccountEnabled = (
+  plugin: ChannelPlugin,
+  account: unknown,
+  cfg: OpenClawConfig,
+): boolean => {
+  if (plugin.config.isEnabled) {
+    return plugin.config.isEnabled(account, cfg);
+  }
+  const enabled = asRecord(account).enabled;
+  return enabled !== false;
+};
+
+const resolveAccountConfigured = async (
+  plugin: ChannelPlugin,
+  account: unknown,
+  cfg: OpenClawConfig,
+): Promise<boolean> => {
+  if (plugin.config.isConfigured) {
+    return await plugin.config.isConfigured(account, cfg);
+  }
+  const configured = asRecord(account).configured;
+  return configured !== false;
 };
 
 const buildAccountNotes = (params: {
@@ -321,13 +343,8 @@ export async function buildChannelsTable(
     const accounts: ChannelAccountRow[] = [];
     for (const accountId of resolvedAccountIds) {
       const account = plugin.config.resolveAccount(cfg, accountId);
-      const enabled = resolveChannelAccountEnabled({ plugin, account, cfg });
-      const configured = await resolveChannelAccountConfigured({
-        plugin,
-        account,
-        cfg,
-        readAccountConfiguredField: true,
-      });
+      const enabled = resolveAccountEnabled(plugin, account, cfg);
+      const configured = await resolveAccountConfigured(plugin, account, cfg);
       const snapshot = buildChannelAccountSnapshot({
         plugin,
         cfg,

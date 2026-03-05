@@ -182,16 +182,6 @@ export function emitAssistantLifecycleErrorAndEnd(params: {
   params.emit({ type: "agent_end" });
 }
 
-export function createReasoningFinalAnswerMessage(): AssistantMessage {
-  return {
-    role: "assistant",
-    content: [
-      { type: "thinking", thinking: "Because it helps" },
-      { type: "text", text: "Final answer" },
-    ],
-  } as AssistantMessage;
-}
-
 type LifecycleErrorAgentEvent = {
   stream?: unknown;
   data?: {

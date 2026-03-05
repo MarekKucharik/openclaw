@@ -1,13 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import type { RequestPermissionRequest } from "@agentclientprotocol/sdk";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTrackedTempDirs } from "../test-utils/tracked-temp-dirs.js";
-import {
-  resolveAcpClientSpawnEnv,
-  resolveAcpClientSpawnInvocation,
-  resolvePermissionRequest,
-} from "./client.js";
+import { describe, expect, it, vi } from "vitest";
+import { resolvePermissionRequest } from "./client.js";
 import { extractAttachmentsFromPrompt, extractTextFromPrompt } from "./event-mapper.js";
 
 function makePermissionRequest(
@@ -35,126 +28,7 @@ function makePermissionRequest(
   };
 }
 
-const tempDirs = createTrackedTempDirs();
-const createTempDir = () => tempDirs.make("openclaw-acp-client-test-");
-
-afterEach(async () => {
-  await tempDirs.cleanup();
-});
-
-describe("resolveAcpClientSpawnEnv", () => {
-  it("sets OPENCLAW_SHELL marker and preserves existing env values", () => {
-    const env = resolveAcpClientSpawnEnv({
-      PATH: "/usr/bin",
-      USER: "openclaw",
-    });
-
-    expect(env.OPENCLAW_SHELL).toBe("acp-client");
-    expect(env.PATH).toBe("/usr/bin");
-    expect(env.USER).toBe("openclaw");
-  });
-
-  it("overrides pre-existing OPENCLAW_SHELL to acp-client", () => {
-    const env = resolveAcpClientSpawnEnv({
-      OPENCLAW_SHELL: "wrong",
-    });
-    expect(env.OPENCLAW_SHELL).toBe("acp-client");
-  });
-});
-
-describe("resolveAcpClientSpawnInvocation", () => {
-  it("keeps non-windows invocation unchanged", () => {
-    const resolved = resolveAcpClientSpawnInvocation(
-      { serverCommand: "openclaw", serverArgs: ["acp", "--verbose"] },
-      {
-        platform: "darwin",
-        env: {},
-        execPath: "/usr/bin/node",
-      },
-    );
-    expect(resolved).toEqual({
-      command: "openclaw",
-      args: ["acp", "--verbose"],
-      shell: undefined,
-      windowsHide: undefined,
-    });
-  });
-
-  it("unwraps .cmd shim entrypoint on windows", async () => {
-    const dir = await createTempDir();
-    const scriptPath = path.join(dir, "openclaw", "dist", "entry.js");
-    const shimPath = path.join(dir, "openclaw.cmd");
-    await mkdir(path.dirname(scriptPath), { recursive: true });
-    await writeFile(scriptPath, "console.log('ok')\n", "utf8");
-    await writeFile(shimPath, `@ECHO off\r\n"%~dp0\\openclaw\\dist\\entry.js" %*\r\n`, "utf8");
-
-    const resolved = resolveAcpClientSpawnInvocation(
-      { serverCommand: shimPath, serverArgs: ["acp", "--verbose"] },
-      {
-        platform: "win32",
-        env: { PATH: dir, PATHEXT: ".CMD;.EXE;.BAT" },
-        execPath: "C:\\node\\node.exe",
-      },
-    );
-    expect(resolved.command).toBe("C:\\node\\node.exe");
-    expect(resolved.args).toEqual([scriptPath, "acp", "--verbose"]);
-    expect(resolved.shell).toBeUndefined();
-    expect(resolved.windowsHide).toBe(true);
-  });
-
-  it("falls back to shell mode for unresolved wrappers on windows", async () => {
-    const dir = await createTempDir();
-    const shimPath = path.join(dir, "openclaw.cmd");
-    await writeFile(shimPath, "@ECHO off\r\necho wrapper\r\n", "utf8");
-
-    const resolved = resolveAcpClientSpawnInvocation(
-      { serverCommand: shimPath, serverArgs: ["acp"] },
-      {
-        platform: "win32",
-        env: { PATH: dir, PATHEXT: ".CMD;.EXE;.BAT" },
-        execPath: "C:\\node\\node.exe",
-      },
-    );
-
-    expect(resolved).toEqual({
-      command: shimPath,
-      args: ["acp"],
-      shell: true,
-      windowsHide: undefined,
-    });
-  });
-});
-
 describe("resolvePermissionRequest", () => {
-  async function expectPromptReject(params: {
-    request: Partial<RequestPermissionRequest>;
-    expectedToolName: string | undefined;
-    expectedTitle: string;
-  }) {
-    const prompt = vi.fn(async () => false);
-    const res = await resolvePermissionRequest(makePermissionRequest(params.request), {
-      prompt,
-      log: () => {},
-    });
-    expect(prompt).toHaveBeenCalledTimes(1);
-    expect(prompt).toHaveBeenCalledWith(params.expectedToolName, params.expectedTitle);
-    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
-  }
-
-  async function expectAutoAllowWithoutPrompt(params: {
-    request: Partial<RequestPermissionRequest>;
-    cwd?: string;
-  }) {
-    const prompt = vi.fn(async () => true);
-    const res = await resolvePermissionRequest(makePermissionRequest(params.request), {
-      prompt,
-      log: () => {},
-      cwd: params.cwd,
-    });
-    expect(prompt).not.toHaveBeenCalled();
-    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "allow" } });
-  }
-
   it("auto-approves safe tools without prompting", async () => {
     const prompt = vi.fn(async () => true);
     const res = await resolvePermissionRequest(makePermissionRequest(), { prompt, log: () => {} });
@@ -214,31 +88,37 @@ describe("resolvePermissionRequest", () => {
   });
 
   it("auto-approves read when rawInput path resolves inside cwd", async () => {
-    await expectAutoAllowWithoutPrompt({
-      request: {
+    const prompt = vi.fn(async () => true);
+    const res = await resolvePermissionRequest(
+      makePermissionRequest({
         toolCall: {
           toolCallId: "tool-read-inside-cwd",
           title: "read: ignored-by-raw-input",
           status: "pending",
           rawInput: { path: "docs/security.md" },
         },
-      },
-      cwd: "/tmp/openclaw-acp-cwd",
-    });
+      }),
+      { prompt, log: () => {}, cwd: "/tmp/openclaw-acp-cwd" },
+    );
+    expect(prompt).not.toHaveBeenCalled();
+    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "allow" } });
   });
 
   it("auto-approves read when rawInput file URL resolves inside cwd", async () => {
-    await expectAutoAllowWithoutPrompt({
-      request: {
+    const prompt = vi.fn(async () => true);
+    const res = await resolvePermissionRequest(
+      makePermissionRequest({
         toolCall: {
           toolCallId: "tool-read-inside-cwd-file-url",
           title: "read: ignored-by-raw-input",
           status: "pending",
           rawInput: { path: "file:///tmp/openclaw-acp-cwd/docs/security.md" },
         },
-      },
-      cwd: "/tmp/openclaw-acp-cwd",
-    });
+      }),
+      { prompt, log: () => {}, cwd: "/tmp/openclaw-acp-cwd" },
+    );
+    expect(prompt).not.toHaveBeenCalled();
+    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "allow" } });
   });
 
   it("prompts for read when rawInput path escapes cwd via traversal", async () => {
@@ -366,47 +246,56 @@ describe("resolvePermissionRequest", () => {
   });
 
   it("prompts when metadata tool name contains invalid characters", async () => {
-    await expectPromptReject({
-      request: {
+    const prompt = vi.fn(async () => false);
+    const res = await resolvePermissionRequest(
+      makePermissionRequest({
         toolCall: {
           toolCallId: "tool-invalid-meta",
           title: "read: src/index.ts",
           status: "pending",
           _meta: { toolName: "read.*" },
         },
-      },
-      expectedToolName: undefined,
-      expectedTitle: "read: src/index.ts",
-    });
+      }),
+      { prompt, log: () => {} },
+    );
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(prompt).toHaveBeenCalledWith(undefined, "read: src/index.ts");
+    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
   });
 
   it("prompts when raw input tool name exceeds max length", async () => {
-    await expectPromptReject({
-      request: {
+    const prompt = vi.fn(async () => false);
+    const res = await resolvePermissionRequest(
+      makePermissionRequest({
         toolCall: {
           toolCallId: "tool-long-raw",
           title: "read: src/index.ts",
           status: "pending",
           rawInput: { toolName: "r".repeat(129) },
         },
-      },
-      expectedToolName: undefined,
-      expectedTitle: "read: src/index.ts",
-    });
+      }),
+      { prompt, log: () => {} },
+    );
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(prompt).toHaveBeenCalledWith(undefined, "read: src/index.ts");
+    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
   });
 
   it("prompts when title tool name contains non-allowed characters", async () => {
-    await expectPromptReject({
-      request: {
+    const prompt = vi.fn(async () => false);
+    const res = await resolvePermissionRequest(
+      makePermissionRequest({
         toolCall: {
           toolCallId: "tool-bad-title-name",
           title: "read🚀: src/index.ts",
           status: "pending",
         },
-      },
-      expectedToolName: undefined,
-      expectedTitle: "read🚀: src/index.ts",
-    });
+      }),
+      { prompt, log: () => {} },
+    );
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(prompt).toHaveBeenCalledWith(undefined, "read🚀: src/index.ts");
+    expect(res).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
   });
 
   it("returns cancelled when no permission options are present", async () => {

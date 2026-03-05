@@ -3,13 +3,11 @@
  */
 
 import { loadConfig } from "../config/config.js";
-import type { OpenClawConfig } from "../config/config.js";
 import { resolveSignalAccount } from "./accounts.js";
 import { signalRpcRequest } from "./client.js";
 import { resolveSignalRpcContext } from "./rpc-context.js";
 
 export type SignalReactionOpts = {
-  cfg?: OpenClawConfig;
   baseUrl?: string;
   account?: string;
   accountId?: string;
@@ -77,9 +75,8 @@ async function sendReactionSignalCore(params: {
   opts: SignalReactionOpts;
   errors: SignalReactionErrorMessages;
 }): Promise<SignalReactionResult> {
-  const cfg = params.opts.cfg ?? loadConfig();
   const accountInfo = resolveSignalAccount({
-    cfg,
+    cfg: loadConfig(),
     accountId: params.opts.accountId,
   });
   const { baseUrl, account } = resolveSignalRpcContext(params.opts, accountInfo);

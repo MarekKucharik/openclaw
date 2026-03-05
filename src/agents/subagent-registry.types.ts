@@ -32,7 +32,4 @@ export type SubagentRunRecord = {
   endedReason?: SubagentLifecycleEndedReason;
   /** Set after the subagent_ended hook has been emitted successfully once. */
   endedHookEmittedAt?: number;
-  attachmentsDir?: string;
-  attachmentsRootDir?: string;
-  retainAttachmentsOnKeep?: boolean;
 };

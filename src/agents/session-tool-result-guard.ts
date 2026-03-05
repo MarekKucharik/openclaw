@@ -9,7 +9,6 @@ import {
   HARD_MAX_TOOL_RESULT_CHARS,
   truncateToolResultMessage,
 } from "./pi-embedded-runner/tool-result-truncation.js";
-import { createPendingToolCallState } from "./session-tool-result-state.js";
 import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcript-repair.js";
 import { extractToolCallsFromAssistant, extractToolResultId } from "./tool-call-id.js";
 
@@ -30,42 +29,6 @@ function capToolResultSize(msg: AgentMessage): AgentMessage {
     suffix: GUARD_TRUNCATION_SUFFIX,
     minKeepChars: 2_000,
   });
-}
-
-function trimNonEmptyString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function normalizePersistedToolResultName(
-  message: AgentMessage,
-  fallbackName?: string,
-): AgentMessage {
-  if ((message as { role?: unknown }).role !== "toolResult") {
-    return message;
-  }
-  const toolResult = message as Extract<AgentMessage, { role: "toolResult" }>;
-  const rawToolName = (toolResult as { toolName?: unknown }).toolName;
-  const normalizedToolName = trimNonEmptyString(rawToolName);
-  if (normalizedToolName) {
-    if (rawToolName === normalizedToolName) {
-      return toolResult;
-    }
-    return { ...toolResult, toolName: normalizedToolName };
-  }
-
-  const normalizedFallback = trimNonEmptyString(fallbackName);
-  if (normalizedFallback) {
-    return { ...toolResult, toolName: normalizedFallback };
-  }
-
-  if (typeof rawToolName === "string") {
-    return { ...toolResult, toolName: "unknown" };
-  }
-  return toolResult;
 }
 
 export function installSessionToolResultGuard(
@@ -107,7 +70,7 @@ export function installSessionToolResultGuard(
   getPendingIds: () => string[];
 } {
   const originalAppend = sessionManager.appendMessage.bind(sessionManager);
-  const pendingState = createPendingToolCallState();
+  const pending = new Map<string, string | undefined>();
   const persistMessage = (message: AgentMessage) => {
     const transformer = opts?.transformMessageForPersistence;
     return transformer ? transformer(message) : message;
@@ -143,11 +106,11 @@ export function installSessionToolResultGuard(
   };
 
   const flushPendingToolResults = () => {
-    if (pendingState.size() === 0) {
+    if (pending.size === 0) {
       return;
     }
     if (allowSyntheticToolResults) {
-      for (const [id, name] of pendingState.entries()) {
+      for (const [id, name] of pending.entries()) {
         const synthetic = makeMissingToolResult({ toolCallId: id, toolName: name });
         const flushed = applyBeforeWriteHook(
           persistToolResult(persistMessage(synthetic), {
@@ -161,7 +124,7 @@ export function installSessionToolResultGuard(
         }
       }
     }
-    pendingState.clear();
+    pending.clear();
   };
 
   const guardedAppend = (message: AgentMessage) => {
@@ -172,7 +135,7 @@ export function installSessionToolResultGuard(
         allowedToolNames: opts?.allowedToolNames,
       });
       if (sanitized.length === 0) {
-        if (pendingState.shouldFlushForSanitizedDrop()) {
+        if (allowSyntheticToolResults && pending.size > 0) {
           flushPendingToolResults();
         }
         return undefined;
@@ -183,14 +146,13 @@ export function installSessionToolResultGuard(
 
     if (nextRole === "toolResult") {
       const id = extractToolResultId(nextMessage as Extract<AgentMessage, { role: "toolResult" }>);
-      const toolName = id ? pendingState.getToolName(id) : undefined;
+      const toolName = id ? pending.get(id) : undefined;
       if (id) {
-        pendingState.delete(id);
+        pending.delete(id);
       }
-      const normalizedToolResult = normalizePersistedToolResultName(nextMessage, toolName);
       // Apply hard size cap before persistence to prevent oversized tool results
       // from consuming the entire context window on subsequent LLM calls.
-      const capped = capToolResultSize(persistMessage(normalizedToolResult));
+      const capped = capToolResultSize(persistMessage(nextMessage));
       const persisted = applyBeforeWriteHook(
         persistToolResult(capped, {
           toolCallId: id ?? undefined,
@@ -216,18 +178,15 @@ export function installSessionToolResultGuard(
         ? extractToolCallsFromAssistant(nextMessage as Extract<AgentMessage, { role: "assistant" }>)
         : [];
 
-    // Always clear pending tool call state before appending non-tool-result messages.
-    // flushPendingToolResults() only inserts synthetic results when allowSyntheticToolResults
-    // is true; it always clears the pending map. Without this, providers that disable
-    // synthetic results (e.g. OpenAI) accumulate stale pending state when a user message
-    // interrupts in-flight tool calls, leaving orphaned tool_use blocks in the transcript
-    // that cause API 400 errors on subsequent requests.
-    if (pendingState.shouldFlushBeforeNonToolResult(nextRole, toolCalls.length)) {
-      flushPendingToolResults();
-    }
-    // If new tool calls arrive while older ones are pending, flush the old ones first.
-    if (pendingState.shouldFlushBeforeNewToolCalls(toolCalls.length)) {
-      flushPendingToolResults();
+    if (allowSyntheticToolResults) {
+      // If previous tool calls are still pending, flush before non-tool results.
+      if (pending.size > 0 && (toolCalls.length === 0 || nextRole !== "assistant")) {
+        flushPendingToolResults();
+      }
+      // If new tool calls arrive while older ones are pending, flush the old ones first.
+      if (pending.size > 0 && toolCalls.length > 0) {
+        flushPendingToolResults();
+      }
     }
 
     const finalMessage = applyBeforeWriteHook(persistMessage(nextMessage));
@@ -244,7 +203,9 @@ export function installSessionToolResultGuard(
     }
 
     if (toolCalls.length > 0) {
-      pendingState.trackToolCalls(toolCalls);
+      for (const call of toolCalls) {
+        pending.set(call.id, call.name);
+      }
     }
 
     return result;
@@ -255,6 +216,6 @@ export function installSessionToolResultGuard(
 
   return {
     flushPendingToolResults,
-    getPendingIds: pendingState.getPendingIds,
+    getPendingIds: () => Array.from(pending.keys()),
   };
 }

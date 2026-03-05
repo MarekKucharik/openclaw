@@ -7,7 +7,6 @@ export const MESSAGE_ACTION_TARGET_MODE: Record<ChannelMessageActionName, Messag
     send: "to",
     broadcast: "none",
     poll: "to",
-    "poll-vote": "to",
     react: "to",
     reactions: "to",
     read: "to",
@@ -56,7 +55,8 @@ export const MESSAGE_ACTION_TARGET_MODE: Record<ChannelMessageActionName, Messag
     kick: "none",
     ban: "none",
     "set-presence": "none",
-    "download-file": "none",
+    setProfilePicture: "none",
+    clearProfilePicture: "none",
   };
 
 const ACTION_TARGET_ALIASES: Partial<Record<ChannelMessageActionName, string[]>> = {

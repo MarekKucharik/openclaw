@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import type { TalkConfig, TalkProviderConfig } from "./types.gateway.js";
 import type { OpenClawConfig } from "./types.js";
-import { coerceSecretRef } from "./types.secrets.js";
 
 type TalkApiKeyDeps = {
   fs?: typeof fs;
@@ -39,14 +38,6 @@ function normalizeVoiceAliases(value: unknown): Record<string, string> | undefin
   return Object.keys(aliases).length > 0 ? aliases : undefined;
 }
 
-function normalizeTalkSecretInput(value: unknown): TalkProviderConfig["apiKey"] | undefined {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-  }
-  return coerceSecretRef(value) ?? undefined;
-}
-
 function normalizeTalkProviderConfig(value: unknown): TalkProviderConfig | undefined {
   if (!isPlainObject(value)) {
     return undefined;
@@ -64,14 +55,7 @@ function normalizeTalkProviderConfig(value: unknown): TalkProviderConfig | undef
       }
       continue;
     }
-    if (key === "apiKey") {
-      const normalized = normalizeTalkSecretInput(raw);
-      if (normalized !== undefined) {
-        provider.apiKey = normalized;
-      }
-      continue;
-    }
-    if (key === "voiceId" || key === "modelId" || key === "outputFormat") {
+    if (key === "voiceId" || key === "modelId" || key === "outputFormat" || key === "apiKey") {
       const normalized = normalizeString(raw);
       if (normalized) {
         provider[key] = normalized;
@@ -121,8 +105,8 @@ function normalizedLegacyTalkFields(source: Record<string, unknown>): Partial<Ta
   if (outputFormat) {
     legacy.outputFormat = outputFormat;
   }
-  const apiKey = normalizeTalkSecretInput(source.apiKey);
-  if (apiKey !== undefined) {
+  const apiKey = normalizeString(source.apiKey);
+  if (apiKey) {
     legacy.apiKey = apiKey;
   }
   return legacy;
@@ -175,7 +159,7 @@ function legacyTalkFieldsFromProviderConfig(
   if (typeof config.outputFormat === "string") {
     legacy.outputFormat = config.outputFormat;
   }
-  if (config.apiKey !== undefined) {
+  if (typeof config.apiKey === "string") {
     legacy.apiKey = config.apiKey;
   }
   return legacy;

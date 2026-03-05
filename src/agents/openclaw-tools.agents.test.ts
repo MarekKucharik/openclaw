@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPerSenderSessionConfig } from "./test-helpers/session-config.js";
 
 let configOverride: ReturnType<(typeof import("../config/config.js"))["loadConfig"]> = {
-  session: createPerSenderSessionConfig(),
+  session: {
+    mainKey: "main",
+    scope: "per-sender",
+  },
 };
 
 vi.mock("../config/config.js", async (importOriginal) => {
@@ -22,7 +24,10 @@ describe("agents_list", () => {
 
   function setConfigWithAgentList(agentList: AgentConfig[]) {
     configOverride = {
-      session: createPerSenderSessionConfig(),
+      session: {
+        mainKey: "main",
+        scope: "per-sender",
+      },
       agents: {
         list: agentList,
       },
@@ -46,7 +51,10 @@ describe("agents_list", () => {
 
   beforeEach(() => {
     configOverride = {
-      session: createPerSenderSessionConfig(),
+      session: {
+        mainKey: "main",
+        scope: "per-sender",
+      },
     };
   });
 

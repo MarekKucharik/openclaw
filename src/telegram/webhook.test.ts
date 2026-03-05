@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { request, type IncomingMessage } from "node:http";
+import { request } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import { startTelegramWebhook } from "./webhook.js";
@@ -20,25 +20,6 @@ const createTelegramBotSpy = vi.hoisted(() =>
 );
 
 const WEBHOOK_POST_TIMEOUT_MS = process.platform === "win32" ? 20_000 : 8_000;
-const TELEGRAM_TOKEN = "tok";
-const TELEGRAM_SECRET = "secret";
-const TELEGRAM_WEBHOOK_PATH = "/hook";
-
-function collectResponseBody(
-  res: IncomingMessage,
-  onDone: (payload: { statusCode: number; body: string }) => void,
-): void {
-  const chunks: Buffer[] = [];
-  res.on("data", (chunk: Buffer | string) => {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  });
-  res.on("end", () => {
-    onDone({
-      statusCode: res.statusCode ?? 0,
-      body: Buffer.concat(chunks).toString("utf-8"),
-    });
-  });
-}
 
 vi.mock("grammy", async (importOriginal) => {
   const actual = await importOriginal<typeof import("grammy")>();
@@ -140,7 +121,16 @@ async function postWebhookPayloadWithChunkPlan(params: {
         },
       },
       (res) => {
-        collectResponseBody(res, finishResolve);
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer | string) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        res.on("end", () => {
+          finishResolve({
+            statusCode: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf-8"),
+          });
+        });
       },
     );
 
@@ -212,175 +202,87 @@ function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-type StartWebhookOptions = Omit<
-  Parameters<typeof startTelegramWebhook>[0],
-  "token" | "port" | "abortSignal"
->;
-
-type StartedWebhook = Awaited<ReturnType<typeof startTelegramWebhook>>;
-
-function getServerPort(server: StartedWebhook["server"]): number {
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("no addr");
-  }
-  return address.port;
-}
-
-function webhookUrl(port: number, webhookPath: string): string {
-  return `http://127.0.0.1:${port}${webhookPath}`;
-}
-
-async function withStartedWebhook<T>(
-  options: StartWebhookOptions,
-  run: (ctx: { server: StartedWebhook["server"]; port: number }) => Promise<T>,
-): Promise<T> {
-  const abort = new AbortController();
-  const started = await startTelegramWebhook({
-    token: TELEGRAM_TOKEN,
-    port: 0,
-    abortSignal: abort.signal,
-    ...options,
-  });
-  try {
-    return await run({ server: started.server, port: getServerPort(started.server) });
-  } finally {
-    abort.abort();
-  }
-}
-
-function expectSingleNearLimitUpdate(params: {
-  seenUpdates: Array<{ update_id: number; message: { text: string } }>;
-  expected: { update_id: number; message: { text: string } };
-}) {
-  expect(params.seenUpdates).toHaveLength(1);
-  expect(params.seenUpdates[0]?.update_id).toBe(params.expected.update_id);
-  expect(params.seenUpdates[0]?.message.text.length).toBe(params.expected.message.text.length);
-  expect(sha256(params.seenUpdates[0]?.message.text ?? "")).toBe(
-    sha256(params.expected.message.text),
-  );
-}
-
-async function runNearLimitPayloadTest(mode: "single" | "random-chunked"): Promise<void> {
-  const seenUpdates: Array<{ update_id: number; message: { text: string } }> = [];
-  webhookCallbackSpy.mockImplementationOnce(
-    () =>
-      vi.fn(
-        (
-          update: unknown,
-          reply: (json: string) => Promise<void>,
-          _secretHeader: string | undefined,
-          _unauthorized: () => Promise<void>,
-        ) => {
-          seenUpdates.push(update as { update_id: number; message: { text: string } });
-          void reply("ok");
-        },
-      ) as unknown as typeof handlerSpy,
-  );
-
-  const { payload, sizeBytes } = createNearLimitTelegramPayload();
-  expect(sizeBytes).toBeLessThan(1_024 * 1_024);
-  expect(sizeBytes).toBeGreaterThan(256 * 1_024);
-  const expected = JSON.parse(payload) as { update_id: number; message: { text: string } };
-
-  await withStartedWebhook(
-    {
-      secret: TELEGRAM_SECRET,
-      path: TELEGRAM_WEBHOOK_PATH,
-    },
-    async ({ port }) => {
-      const response = await postWebhookPayloadWithChunkPlan({
-        port,
-        path: TELEGRAM_WEBHOOK_PATH,
-        payload,
-        secret: TELEGRAM_SECRET,
-        mode,
-        timeoutMs: WEBHOOK_POST_TIMEOUT_MS,
-      });
-
-      expect(response.statusCode).toBe(200);
-      expectSingleNearLimitUpdate({ seenUpdates, expected });
-    },
-  );
-}
-
 describe("startTelegramWebhook", () => {
   it("starts server, registers webhook, and serves health", async () => {
     initSpy.mockClear();
     createTelegramBotSpy.mockClear();
     webhookCallbackSpy.mockClear();
-    const runtimeLog = vi.fn();
+    const abort = new AbortController();
     const cfg = { bindings: [] };
-    await withStartedWebhook(
-      {
-        secret: TELEGRAM_SECRET,
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret: "secret",
+      accountId: "opie",
+      config: cfg,
+      port: 0, // random free port
+      abortSignal: abort.signal,
+    });
+    expect(createTelegramBotSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
         accountId: "opie",
-        config: cfg,
-        runtime: { log: runtimeLog, error: vi.fn(), exit: vi.fn() },
-      },
-      async ({ port }) => {
-        expect(createTelegramBotSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            accountId: "opie",
-            config: expect.objectContaining({ bindings: [] }),
-          }),
-        );
-        const health = await fetch(`http://127.0.0.1:${port}/healthz`);
-        expect(health.status).toBe(200);
-        expect(initSpy).toHaveBeenCalledTimes(1);
-        expect(setWebhookSpy).toHaveBeenCalled();
-        expect(webhookCallbackSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            api: expect.objectContaining({
-              setWebhook: expect.any(Function),
-            }),
-          }),
-          "callback",
-          {
-            secretToken: TELEGRAM_SECRET,
-            onTimeout: "return",
-            timeoutMilliseconds: 10_000,
-          },
-        );
-        expect(runtimeLog).toHaveBeenCalledWith(
-          expect.stringContaining("webhook local listener on http://127.0.0.1:"),
-        );
-        expect(runtimeLog).toHaveBeenCalledWith(expect.stringContaining("/telegram-webhook"));
-        expect(runtimeLog).toHaveBeenCalledWith(
-          expect.stringContaining("webhook advertised to telegram on http://"),
-        );
+        config: expect.objectContaining({ bindings: [] }),
+      }),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("no address");
+    }
+    const url = `http://127.0.0.1:${address.port}`;
+
+    const health = await fetch(`${url}/healthz`);
+    expect(health.status).toBe(200);
+    expect(initSpy).toHaveBeenCalledTimes(1);
+    expect(setWebhookSpy).toHaveBeenCalled();
+    expect(webhookCallbackSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        api: expect.objectContaining({
+          setWebhook: expect.any(Function),
+        }),
+      }),
+      "callback",
+      {
+        secretToken: "secret",
+        onTimeout: "return",
+        timeoutMilliseconds: 10_000,
       },
     );
+
+    abort.abort();
   });
 
   it("invokes webhook handler on matching path", async () => {
     handlerSpy.mockClear();
     createTelegramBotSpy.mockClear();
+    const abort = new AbortController();
     const cfg = { bindings: [] };
-    await withStartedWebhook(
-      {
-        secret: TELEGRAM_SECRET,
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret: "secret",
+      accountId: "opie",
+      config: cfg,
+      port: 0,
+      abortSignal: abort.signal,
+      path: "/hook",
+    });
+    expect(createTelegramBotSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
         accountId: "opie",
-        config: cfg,
-        path: TELEGRAM_WEBHOOK_PATH,
-      },
-      async ({ port }) => {
-        expect(createTelegramBotSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            accountId: "opie",
-            config: expect.objectContaining({ bindings: [] }),
-          }),
-        );
-        const payload = JSON.stringify({ update_id: 1, message: { text: "hello" } });
-        const response = await postWebhookJson({
-          url: webhookUrl(port, TELEGRAM_WEBHOOK_PATH),
-          payload,
-          secret: TELEGRAM_SECRET,
-        });
-        expect(response.status).toBe(200);
-        expect(handlerSpy).toHaveBeenCalled();
-      },
+        config: expect.objectContaining({ bindings: [] }),
+      }),
     );
+    const addr = server.address();
+    if (!addr || typeof addr === "string") {
+      throw new Error("no addr");
+    }
+    const payload = JSON.stringify({ update_id: 1, message: { text: "hello" } });
+    const response = await postWebhookJson({
+      url: `http://127.0.0.1:${addr.port}/hook`,
+      payload,
+      secret: "secret",
+    });
+    expect(response.status).toBe(200);
+    expect(handlerSpy).toHaveBeenCalled();
+    abort.abort();
   });
 
   it("rejects startup when webhook secret is missing", async () => {
@@ -393,88 +295,109 @@ describe("startTelegramWebhook", () => {
 
   it("registers webhook using the bound listening port when port is 0", async () => {
     setWebhookSpy.mockClear();
-    const runtimeLog = vi.fn();
-    await withStartedWebhook(
-      {
-        secret: TELEGRAM_SECRET,
-        path: TELEGRAM_WEBHOOK_PATH,
-        runtime: { log: runtimeLog, error: vi.fn(), exit: vi.fn() },
-      },
-      async ({ port }) => {
-        expect(port).toBeGreaterThan(0);
-        expect(setWebhookSpy).toHaveBeenCalledTimes(1);
-        expect(setWebhookSpy).toHaveBeenCalledWith(
-          webhookUrl(port, TELEGRAM_WEBHOOK_PATH),
-          expect.objectContaining({
-            secret_token: TELEGRAM_SECRET,
-          }),
-        );
-        expect(runtimeLog).toHaveBeenCalledWith(
-          `webhook local listener on ${webhookUrl(port, TELEGRAM_WEBHOOK_PATH)}`,
-        );
-      },
-    );
+    const abort = new AbortController();
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret: "secret",
+      port: 0,
+      abortSignal: abort.signal,
+      path: "/hook",
+    });
+    try {
+      const addr = server.address();
+      if (!addr || typeof addr === "string") {
+        throw new Error("no addr");
+      }
+      expect(addr.port).toBeGreaterThan(0);
+      expect(setWebhookSpy).toHaveBeenCalledTimes(1);
+      expect(setWebhookSpy).toHaveBeenCalledWith(
+        `http://127.0.0.1:${addr.port}/hook`,
+        expect.objectContaining({
+          secret_token: "secret",
+        }),
+      );
+    } finally {
+      abort.abort();
+    }
   });
 
   it("keeps webhook payload readable when callback delays body read", async () => {
     handlerSpy.mockImplementationOnce(async (...args: unknown[]) => {
       const [update, reply] = args as [unknown, (json: string) => Promise<void>];
-      await sleep(10);
+      await sleep(50);
       await reply(JSON.stringify(update));
     });
 
-    await withStartedWebhook(
-      {
-        secret: TELEGRAM_SECRET,
-        path: TELEGRAM_WEBHOOK_PATH,
-      },
-      async ({ port }) => {
-        const payload = JSON.stringify({ update_id: 1, message: { text: "hello" } });
-        const res = await postWebhookJson({
-          url: webhookUrl(port, TELEGRAM_WEBHOOK_PATH),
-          payload,
-          secret: TELEGRAM_SECRET,
-        });
-        expect(res.status).toBe(200);
-        const responseBody = await res.text();
-        expect(JSON.parse(responseBody)).toEqual(JSON.parse(payload));
-      },
-    );
+    const abort = new AbortController();
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret: "secret",
+      port: 0,
+      abortSignal: abort.signal,
+      path: "/hook",
+    });
+    try {
+      const addr = server.address();
+      if (!addr || typeof addr === "string") {
+        throw new Error("no addr");
+      }
+
+      const payload = JSON.stringify({ update_id: 1, message: { text: "hello" } });
+      const res = await postWebhookJson({
+        url: `http://127.0.0.1:${addr.port}/hook`,
+        payload,
+        secret: "secret",
+      });
+      expect(res.status).toBe(200);
+      const responseBody = await res.text();
+      expect(JSON.parse(responseBody)).toEqual(JSON.parse(payload));
+    } finally {
+      abort.abort();
+    }
   });
 
   it("keeps webhook payload readable across multiple delayed reads", async () => {
     const seenPayloads: string[] = [];
     const delayedHandler = async (...args: unknown[]) => {
       const [update, reply] = args as [unknown, (json: string) => Promise<void>];
-      await sleep(10);
+      await sleep(50);
       seenPayloads.push(JSON.stringify(update));
       await reply("ok");
     };
     handlerSpy.mockImplementationOnce(delayedHandler).mockImplementationOnce(delayedHandler);
 
-    await withStartedWebhook(
-      {
-        secret: TELEGRAM_SECRET,
-        path: TELEGRAM_WEBHOOK_PATH,
-      },
-      async ({ port }) => {
-        const payloads = [
-          JSON.stringify({ update_id: 1, message: { text: "first" } }),
-          JSON.stringify({ update_id: 2, message: { text: "second" } }),
-        ];
+    const abort = new AbortController();
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret: "secret",
+      port: 0,
+      abortSignal: abort.signal,
+      path: "/hook",
+    });
+    try {
+      const addr = server.address();
+      if (!addr || typeof addr === "string") {
+        throw new Error("no addr");
+      }
 
-        for (const payload of payloads) {
-          const res = await postWebhookJson({
-            url: webhookUrl(port, TELEGRAM_WEBHOOK_PATH),
-            payload,
-            secret: TELEGRAM_SECRET,
-          });
-          expect(res.status).toBe(200);
-        }
+      const payloads = [
+        JSON.stringify({ update_id: 1, message: { text: "first" } }),
+        JSON.stringify({ update_id: 2, message: { text: "second" } }),
+      ];
 
-        expect(seenPayloads.map((x) => JSON.parse(x))).toEqual(payloads.map((x) => JSON.parse(x)));
-      },
-    );
+      for (const payload of payloads) {
+        const res = await postWebhookJson({
+          url: `http://127.0.0.1:${addr.port}/hook`,
+          payload,
+          secret: "secret",
+        });
+        expect(res.status).toBe(200);
+      }
+
+      expect(seenPayloads.map((x) => JSON.parse(x))).toEqual(payloads.map((x) => JSON.parse(x)));
+    } finally {
+      abort.abort();
+    }
   });
 
   it("processes a second request after first-request delayed-init data loss", async () => {
@@ -490,113 +413,250 @@ describe("startTelegramWebhook", () => {
           ) => {
             seenUpdates.push(update);
             void (async () => {
-              await sleep(10);
+              await sleep(50);
               await reply("ok");
             })();
           },
         ) as unknown as typeof handlerSpy,
     );
 
-    await withStartedWebhook(
-      {
-        secret: TELEGRAM_SECRET,
-        path: TELEGRAM_WEBHOOK_PATH,
-      },
-      async ({ port }) => {
-        const firstPayload = JSON.stringify({ update_id: 100, message: { text: "first" } });
-        const secondPayload = JSON.stringify({ update_id: 101, message: { text: "second" } });
-        const firstResponse = await postWebhookPayloadWithChunkPlan({
-          port,
-          path: TELEGRAM_WEBHOOK_PATH,
-          payload: firstPayload,
-          secret: TELEGRAM_SECRET,
-          mode: "single",
-          timeoutMs: WEBHOOK_POST_TIMEOUT_MS,
-        });
-        const secondResponse = await postWebhookPayloadWithChunkPlan({
-          port,
-          path: TELEGRAM_WEBHOOK_PATH,
-          payload: secondPayload,
-          secret: TELEGRAM_SECRET,
-          mode: "single",
-          timeoutMs: WEBHOOK_POST_TIMEOUT_MS,
-        });
+    const secret = "secret";
+    const abort = new AbortController();
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret,
+      port: 0,
+      abortSignal: abort.signal,
+      path: "/hook",
+    });
 
-        expect(firstResponse.statusCode).toBe(200);
-        expect(secondResponse.statusCode).toBe(200);
-        expect(seenUpdates).toEqual([JSON.parse(firstPayload), JSON.parse(secondPayload)]);
-      },
-    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("no addr");
+      }
+
+      const firstPayload = JSON.stringify({ update_id: 100, message: { text: "first" } });
+      const secondPayload = JSON.stringify({ update_id: 101, message: { text: "second" } });
+      const firstResponse = await postWebhookPayloadWithChunkPlan({
+        port: address.port,
+        path: "/hook",
+        payload: firstPayload,
+        secret,
+        mode: "single",
+        timeoutMs: WEBHOOK_POST_TIMEOUT_MS,
+      });
+      const secondResponse = await postWebhookPayloadWithChunkPlan({
+        port: address.port,
+        path: "/hook",
+        payload: secondPayload,
+        secret,
+        mode: "single",
+        timeoutMs: WEBHOOK_POST_TIMEOUT_MS,
+      });
+
+      expect(firstResponse.statusCode).toBe(200);
+      expect(secondResponse.statusCode).toBe(200);
+      expect(seenUpdates).toEqual([JSON.parse(firstPayload), JSON.parse(secondPayload)]);
+    } finally {
+      abort.abort();
+    }
   });
 
   it("handles near-limit payload with random chunk writes and event-loop yields", async () => {
-    await runNearLimitPayloadTest("random-chunked");
+    const seenUpdates: Array<{ update_id: number; message: { text: string } }> = [];
+    webhookCallbackSpy.mockImplementationOnce(
+      () =>
+        vi.fn(
+          (
+            update: unknown,
+            reply: (json: string) => Promise<void>,
+            _secretHeader: string | undefined,
+            _unauthorized: () => Promise<void>,
+          ) => {
+            seenUpdates.push(update as { update_id: number; message: { text: string } });
+            void reply("ok");
+          },
+        ) as unknown as typeof handlerSpy,
+    );
+
+    const { payload, sizeBytes } = createNearLimitTelegramPayload();
+    expect(sizeBytes).toBeLessThan(1_024 * 1_024);
+    expect(sizeBytes).toBeGreaterThan(256 * 1_024);
+    const expected = JSON.parse(payload) as { update_id: number; message: { text: string } };
+
+    const secret = "secret";
+    const abort = new AbortController();
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret,
+      port: 0,
+      abortSignal: abort.signal,
+      path: "/hook",
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("no addr");
+      }
+
+      const response = await postWebhookPayloadWithChunkPlan({
+        port: address.port,
+        path: "/hook",
+        payload,
+        secret,
+        mode: "random-chunked",
+        timeoutMs: WEBHOOK_POST_TIMEOUT_MS,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(seenUpdates).toHaveLength(1);
+      expect(seenUpdates[0]?.update_id).toBe(expected.update_id);
+      expect(seenUpdates[0]?.message.text.length).toBe(expected.message.text.length);
+      expect(sha256(seenUpdates[0]?.message.text ?? "")).toBe(sha256(expected.message.text));
+    } finally {
+      abort.abort();
+    }
   });
 
   it("handles near-limit payload written in a single request write", async () => {
-    await runNearLimitPayloadTest("single");
+    const seenUpdates: Array<{ update_id: number; message: { text: string } }> = [];
+    webhookCallbackSpy.mockImplementationOnce(
+      () =>
+        vi.fn(
+          (
+            update: unknown,
+            reply: (json: string) => Promise<void>,
+            _secretHeader: string | undefined,
+            _unauthorized: () => Promise<void>,
+          ) => {
+            seenUpdates.push(update as { update_id: number; message: { text: string } });
+            void reply("ok");
+          },
+        ) as unknown as typeof handlerSpy,
+    );
+
+    const { payload, sizeBytes } = createNearLimitTelegramPayload();
+    expect(sizeBytes).toBeLessThan(1_024 * 1_024);
+    expect(sizeBytes).toBeGreaterThan(256 * 1_024);
+    const expected = JSON.parse(payload) as { update_id: number; message: { text: string } };
+
+    const secret = "secret";
+    const abort = new AbortController();
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret,
+      port: 0,
+      abortSignal: abort.signal,
+      path: "/hook",
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("no addr");
+      }
+
+      const response = await postWebhookPayloadWithChunkPlan({
+        port: address.port,
+        path: "/hook",
+        payload,
+        secret,
+        mode: "single",
+        timeoutMs: WEBHOOK_POST_TIMEOUT_MS,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(seenUpdates).toHaveLength(1);
+      expect(seenUpdates[0]?.update_id).toBe(expected.update_id);
+      expect(seenUpdates[0]?.message.text.length).toBe(expected.message.text.length);
+      expect(sha256(seenUpdates[0]?.message.text ?? "")).toBe(sha256(expected.message.text));
+    } finally {
+      abort.abort();
+    }
   });
 
   it("rejects payloads larger than 1MB before invoking webhook handler", async () => {
     handlerSpy.mockClear();
-    await withStartedWebhook(
-      {
-        secret: TELEGRAM_SECRET,
-        path: TELEGRAM_WEBHOOK_PATH,
-      },
-      async ({ port }) => {
-        const responseOrError = await new Promise<
-          | { kind: "response"; statusCode: number; body: string }
-          | { kind: "error"; code: string | undefined }
-        >((resolve) => {
-          const req = request(
-            {
-              hostname: "127.0.0.1",
-              port,
-              path: TELEGRAM_WEBHOOK_PATH,
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                "content-length": String(1_024 * 1_024 + 2_048),
-                "x-telegram-bot-api-secret-token": TELEGRAM_SECRET,
-              },
-            },
-            (res) => {
-              collectResponseBody(res, (payload) => {
-                resolve({ kind: "response", ...payload });
-              });
-            },
-          );
-          req.on("error", (error: NodeJS.ErrnoException) => {
-            resolve({ kind: "error", code: error.code });
-          });
-          req.end("{}");
-        });
+    const abort = new AbortController();
+    const { server } = await startTelegramWebhook({
+      token: "tok",
+      secret: "secret",
+      port: 0,
+      abortSignal: abort.signal,
+      path: "/hook",
+    });
 
-        if (responseOrError.kind === "response") {
-          expect(responseOrError.statusCode).toBe(413);
-          expect(responseOrError.body).toBe("Payload too large");
-        } else {
-          expect(responseOrError.code).toBeOneOf(["ECONNRESET", "EPIPE"]);
-        }
-        expect(handlerSpy).not.toHaveBeenCalled();
-      },
-    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("no addr");
+      }
+
+      const responseOrError = await new Promise<
+        | { kind: "response"; statusCode: number; body: string }
+        | { kind: "error"; code: string | undefined }
+      >((resolve) => {
+        const req = request(
+          {
+            hostname: "127.0.0.1",
+            port: address.port,
+            path: "/hook",
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "content-length": String(1_024 * 1_024 + 2_048),
+              "x-telegram-bot-api-secret-token": "secret",
+            },
+          },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (chunk: Buffer | string) => {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            });
+            res.on("end", () => {
+              resolve({
+                kind: "response",
+                statusCode: res.statusCode ?? 0,
+                body: Buffer.concat(chunks).toString("utf-8"),
+              });
+            });
+          },
+        );
+        req.on("error", (error: NodeJS.ErrnoException) => {
+          resolve({ kind: "error", code: error.code });
+        });
+        req.end("{}");
+      });
+
+      if (responseOrError.kind === "response") {
+        expect(responseOrError.statusCode).toBe(413);
+        expect(responseOrError.body).toBe("Payload too large");
+      } else {
+        expect(responseOrError.code).toBeOneOf(["ECONNRESET", "EPIPE"]);
+      }
+      expect(handlerSpy).not.toHaveBeenCalled();
+    } finally {
+      abort.abort();
+    }
   });
 
   it("de-registers webhook when shutting down", async () => {
     deleteWebhookSpy.mockClear();
     const abort = new AbortController();
     await startTelegramWebhook({
-      token: TELEGRAM_TOKEN,
-      secret: TELEGRAM_SECRET,
+      token: "tok",
+      secret: "secret",
       port: 0,
       abortSignal: abort.signal,
-      path: TELEGRAM_WEBHOOK_PATH,
+      path: "/hook",
     });
 
     abort.abort();
-    await vi.waitFor(() => expect(deleteWebhookSpy).toHaveBeenCalledTimes(1));
+    await sleep(25);
+
+    expect(deleteWebhookSpy).toHaveBeenCalledTimes(1);
     expect(deleteWebhookSpy).toHaveBeenCalledWith({ drop_pending_updates: false });
   });
 });

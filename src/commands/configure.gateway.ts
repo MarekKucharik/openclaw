@@ -1,7 +1,6 @@
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveGatewayPort } from "../config/config.js";
 import {
-  maybeAddTailnetOriginToControlUiAllowedOrigins,
   TAILSCALE_DOCS_LINES,
   TAILSCALE_EXPOSURE_OPTIONS,
   TAILSCALE_MISSING_BIN_NOTE_LINES,
@@ -112,10 +111,8 @@ export async function promptGatewayConfig(
   );
 
   // Detect Tailscale binary before proceeding with serve/funnel setup.
-  // Persist the path so getTailnetHostname can reuse it for origin injection.
-  let tailscaleBin: string | null = null;
   if (tailscaleMode !== "off") {
-    tailscaleBin = await findTailscaleBinary();
+    const tailscaleBin = await findTailscaleBinary();
     if (!tailscaleBin) {
       note(TAILSCALE_MISSING_BIN_NOTE_LINES.join("\n"), "Tailscale Warning");
     }
@@ -287,12 +284,6 @@ export async function promptGatewayConfig(
       },
     },
   };
-
-  next = await maybeAddTailnetOriginToControlUiAllowedOrigins({
-    config: next,
-    tailscaleMode,
-    tailscaleBin,
-  });
 
   return { config: next, port, token: gatewayToken };
 }

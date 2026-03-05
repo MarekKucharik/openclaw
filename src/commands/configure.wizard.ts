@@ -1,10 +1,7 @@
-import fsPromises from "node:fs/promises";
-import nodePath from "node:path";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { readConfigFileSnapshot, resolveGatewayPort, writeConfigFile } from "../config/config.js";
 import { logConfigUpdated } from "../config/logging.js";
-import { normalizeSecretInputString } from "../config/types.secrets.js";
 import { ensureControlUiAssetsBuilt } from "../infra/control-ui-assets.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { defaultRuntime } from "../runtime.js";
@@ -62,9 +59,7 @@ async function runGatewayHealthCheck(params: {
   const remoteUrl = params.cfg.gateway?.remote?.url?.trim();
   const wsUrl = params.cfg.gateway?.mode === "remote" && remoteUrl ? remoteUrl : localLinks.wsUrl;
   const token = params.cfg.gateway?.auth?.token ?? process.env.OPENCLAW_GATEWAY_TOKEN;
-  const password =
-    normalizeSecretInputString(params.cfg.gateway?.auth?.password) ??
-    process.env.OPENCLAW_GATEWAY_PASSWORD;
+  const password = params.cfg.gateway?.auth?.password ?? process.env.OPENCLAW_GATEWAY_PASSWORD;
 
   await waitForGatewayReachable({
     url: wsUrl,
@@ -137,18 +132,12 @@ async function promptWebToolsConfig(
 ): Promise<OpenClawConfig> {
   const existingSearch = nextConfig.tools?.web?.search;
   const existingFetch = nextConfig.tools?.web?.fetch;
-  const existingProvider = existingSearch?.provider ?? "brave";
-  const hasPerplexityKey = Boolean(
-    existingSearch?.perplexity?.apiKey || process.env.PERPLEXITY_API_KEY,
-  );
-  const hasBraveKey = Boolean(existingSearch?.apiKey || process.env.BRAVE_API_KEY);
-  const hasSearchKey = existingProvider === "perplexity" ? hasPerplexityKey : hasBraveKey;
+  const hasSearchKey = Boolean(existingSearch?.apiKey);
 
   note(
     [
       "Web search lets your agent look things up online using the `web_search` tool.",
-      "Choose a provider: Perplexity Search (recommended) or Brave Search.",
-      "Both return structured results (title, URL, snippet) for fast research.",
+      "It requires a Brave Search API key (you can store it in the config or set BRAVE_API_KEY in the Gateway environment).",
       "Docs: https://docs.openclaw.ai/tools/web",
     ].join("\n"),
     "Web search",
@@ -156,7 +145,7 @@ async function promptWebToolsConfig(
 
   const enableSearch = guardCancel(
     await confirm({
-      message: "Enable web_search?",
+      message: "Enable web_search (Brave Search)?",
       initialValue: existingSearch?.enabled ?? hasSearchKey,
     }),
     runtime,
@@ -168,79 +157,27 @@ async function promptWebToolsConfig(
   };
 
   if (enableSearch) {
-    const providerChoice = guardCancel(
-      await select({
-        message: "Choose web search provider",
-        options: [
-          {
-            value: "perplexity",
-            label: "Perplexity Search",
-          },
-          {
-            value: "brave",
-            label: "Brave Search",
-          },
-        ],
-        initialValue: existingProvider,
+    const keyInput = guardCancel(
+      await text({
+        message: hasSearchKey
+          ? "Brave Search API key (leave blank to keep current or use BRAVE_API_KEY)"
+          : "Brave Search API key (paste it here; leave blank to use BRAVE_API_KEY)",
+        placeholder: hasSearchKey ? "Leave blank to keep current" : "BSA...",
       }),
       runtime,
     );
-
-    nextSearch = { ...nextSearch, provider: providerChoice };
-
-    if (providerChoice === "perplexity") {
-      const hasKey = Boolean(existingSearch?.perplexity?.apiKey);
-      const keyInput = guardCancel(
-        await text({
-          message: hasKey
-            ? "Perplexity API key (leave blank to keep current or use PERPLEXITY_API_KEY)"
-            : "Perplexity API key (paste it here; leave blank to use PERPLEXITY_API_KEY)",
-          placeholder: hasKey ? "Leave blank to keep current" : "pplx-...",
-        }),
-        runtime,
+    const key = String(keyInput ?? "").trim();
+    if (key) {
+      nextSearch = { ...nextSearch, apiKey: key };
+    } else if (!hasSearchKey) {
+      note(
+        [
+          "No key stored yet, so web_search will stay unavailable.",
+          "Store a key here or set BRAVE_API_KEY in the Gateway environment.",
+          "Docs: https://docs.openclaw.ai/tools/web",
+        ].join("\n"),
+        "Web search",
       );
-      const key = String(keyInput ?? "").trim();
-      if (key) {
-        nextSearch = {
-          ...nextSearch,
-          perplexity: { ...existingSearch?.perplexity, apiKey: key },
-        };
-      } else if (!hasKey && !process.env.PERPLEXITY_API_KEY) {
-        note(
-          [
-            "No key stored yet, so web_search will stay unavailable.",
-            "Store a key here or set PERPLEXITY_API_KEY in the Gateway environment.",
-            "Get your API key at: https://www.perplexity.ai/settings/api",
-            "Docs: https://docs.openclaw.ai/tools/web",
-          ].join("\n"),
-          "Web search",
-        );
-      }
-    } else {
-      const hasKey = Boolean(existingSearch?.apiKey);
-      const keyInput = guardCancel(
-        await text({
-          message: hasKey
-            ? "Brave Search API key (leave blank to keep current or use BRAVE_API_KEY)"
-            : "Brave Search API key (paste it here; leave blank to use BRAVE_API_KEY)",
-          placeholder: hasKey ? "Leave blank to keep current" : "BSA...",
-        }),
-        runtime,
-      );
-      const key = String(keyInput ?? "").trim();
-      if (key) {
-        nextSearch = { ...nextSearch, apiKey: key };
-      } else if (!hasKey && !process.env.BRAVE_API_KEY) {
-        note(
-          [
-            "No key stored yet, so web_search will stay unavailable.",
-            "Store a key here or set BRAVE_API_KEY in the Gateway environment.",
-            "Get your API key at: https://brave.com/search/api/",
-            "Docs: https://docs.openclaw.ai/tools/web",
-          ].join("\n"),
-          "Web search",
-        );
-      }
     }
   }
 
@@ -308,15 +245,13 @@ export async function runConfigureWizard(
     const localProbe = await probeGatewayReachable({
       url: localUrl,
       token: baseConfig.gateway?.auth?.token ?? process.env.OPENCLAW_GATEWAY_TOKEN,
-      password:
-        normalizeSecretInputString(baseConfig.gateway?.auth?.password) ??
-        process.env.OPENCLAW_GATEWAY_PASSWORD,
+      password: baseConfig.gateway?.auth?.password ?? process.env.OPENCLAW_GATEWAY_PASSWORD,
     });
     const remoteUrl = baseConfig.gateway?.remote?.url?.trim() ?? "";
     const remoteProbe = remoteUrl
       ? await probeGatewayReachable({
           url: remoteUrl,
-          token: normalizeSecretInputString(baseConfig.gateway?.remote?.token),
+          token: baseConfig.gateway?.remote?.token,
         })
       : null;
 
@@ -375,8 +310,8 @@ export async function runConfigureWizard(
       DEFAULT_WORKSPACE;
     let gatewayPort = resolveGatewayPort(baseConfig);
     let gatewayToken: string | undefined =
-      normalizeSecretInputString(nextConfig.gateway?.auth?.token) ??
-      normalizeSecretInputString(baseConfig.gateway?.auth?.token) ??
+      nextConfig.gateway?.auth?.token ??
+      baseConfig.gateway?.auth?.token ??
       process.env.OPENCLAW_GATEWAY_TOKEN;
 
     const persistConfig = async () => {
@@ -397,32 +332,6 @@ export async function runConfigureWizard(
         runtime,
       );
       workspaceDir = resolveUserPath(String(workspaceInput ?? "").trim() || DEFAULT_WORKSPACE);
-      if (!snapshot.exists) {
-        const indicators = ["MEMORY.md", "memory", ".git"].map((name) =>
-          nodePath.join(workspaceDir, name),
-        );
-        const hasExistingContent = (
-          await Promise.all(
-            indicators.map(async (candidate) => {
-              try {
-                await fsPromises.access(candidate);
-                return true;
-              } catch {
-                return false;
-              }
-            }),
-          )
-        ).some(Boolean);
-        if (hasExistingContent) {
-          note(
-            [
-              `Existing workspace detected at ${workspaceDir}`,
-              "Existing files are preserved. Missing templates may be created, never overwritten.",
-            ].join("\n"),
-            "Existing workspace",
-          );
-        }
-      }
       nextConfig = {
         ...nextConfig,
         agents: {
@@ -597,12 +506,8 @@ export async function runConfigureWizard(
       basePath: nextConfig.gateway?.controlUi?.basePath,
     });
     // Try both new and old passwords since gateway may still have old config.
-    const newPassword =
-      normalizeSecretInputString(nextConfig.gateway?.auth?.password) ??
-      process.env.OPENCLAW_GATEWAY_PASSWORD;
-    const oldPassword =
-      normalizeSecretInputString(baseConfig.gateway?.auth?.password) ??
-      process.env.OPENCLAW_GATEWAY_PASSWORD;
+    const newPassword = nextConfig.gateway?.auth?.password ?? process.env.OPENCLAW_GATEWAY_PASSWORD;
+    const oldPassword = baseConfig.gateway?.auth?.password ?? process.env.OPENCLAW_GATEWAY_PASSWORD;
     const token = nextConfig.gateway?.auth?.token ?? process.env.OPENCLAW_GATEWAY_TOKEN;
 
     let gatewayProbe = await probeGatewayReachable({

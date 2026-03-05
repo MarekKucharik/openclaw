@@ -1,5 +1,3 @@
-import type { SecretInput } from "./types.secrets.js";
-
 export type TtsProvider = "elevenlabs" | "openai" | "edge";
 
 export type TtsMode = "final" | "all";
@@ -40,7 +38,7 @@ export type TtsConfig = {
   modelOverrides?: TtsModelOverrideConfig;
   /** ElevenLabs configuration. */
   elevenlabs?: {
-    apiKey?: SecretInput;
+    apiKey?: string;
     baseUrl?: string;
     voiceId?: string;
     modelId?: string;
@@ -57,8 +55,7 @@ export type TtsConfig = {
   };
   /** OpenAI configuration. */
   openai?: {
-    apiKey?: SecretInput;
-    baseUrl?: string;
+    apiKey?: string;
     model?: string;
     voice?: string;
   };

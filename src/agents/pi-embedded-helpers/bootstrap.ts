@@ -84,7 +84,6 @@ export function stripThoughtSignatures<T>(
 
 export const DEFAULT_BOOTSTRAP_MAX_CHARS = 20_000;
 export const DEFAULT_BOOTSTRAP_TOTAL_MAX_CHARS = 150_000;
-export const DEFAULT_BOOTSTRAP_PROMPT_TRUNCATION_WARNING_MODE = "once";
 const MIN_BOOTSTRAP_FILE_BUDGET_CHARS = 64;
 const BOOTSTRAP_HEAD_RATIO = 0.7;
 const BOOTSTRAP_TAIL_RATIO = 0.2;
@@ -110,16 +109,6 @@ export function resolveBootstrapTotalMaxChars(cfg?: OpenClawConfig): number {
     return Math.floor(raw);
   }
   return DEFAULT_BOOTSTRAP_TOTAL_MAX_CHARS;
-}
-
-export function resolveBootstrapPromptTruncationWarningMode(
-  cfg?: OpenClawConfig,
-): "off" | "once" | "always" {
-  const raw = cfg?.agents?.defaults?.bootstrapPromptTruncationWarning;
-  if (raw === "off" || raw === "once" || raw === "always") {
-    return raw;
-  }
-  return DEFAULT_BOOTSTRAP_PROMPT_TRUNCATION_WARNING_MODE;
 }
 
 function trimBootstrapContent(

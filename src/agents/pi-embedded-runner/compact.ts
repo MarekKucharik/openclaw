@@ -6,6 +6,7 @@ import {
   DefaultResourceLoader,
   estimateTokens,
   SessionManager,
+  SettingsManager,
 } from "@mariozechner/pi-coding-agent";
 import { resolveHeartbeatPrompt } from "../../auto-reply/heartbeat.js";
 import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
@@ -39,7 +40,7 @@ import {
   validateAnthropicTurns,
   validateGeminiTurns,
 } from "../pi-embedded-helpers.js";
-import { createPreparedEmbeddedPiSettingsManager } from "../pi-project-settings.js";
+import { applyPiCompactionSettingsFromConfig } from "../pi-settings.js";
 import { createOpenClawCodingTools } from "../pi-tools.js";
 import { resolveSandboxContext } from "../sandbox.js";
 import { repairSessionFileIfNeeded } from "../session-file-repair.js";
@@ -53,6 +54,7 @@ import { detectRuntimeShell } from "../shell-utils.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
+  loadWorkspaceSkillEntries,
   resolveSkillsPromptForRun,
   type SkillSnapshot,
 } from "../skills.js";
@@ -73,7 +75,6 @@ import { log } from "./logger.js";
 import { buildModelAliasLines, resolveModel } from "./model.js";
 import { buildEmbeddedSandboxInfo } from "./sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
-import { resolveEmbeddedRunSkillEntries } from "./skills-runtime.js";
 import {
   applySystemPromptOverrideToSession,
   buildEmbeddedSystemPrompt,
@@ -333,11 +334,10 @@ export async function compactEmbeddedPiSessionDirect(
   let restoreSkillEnv: (() => void) | undefined;
   process.chdir(effectiveWorkspace);
   try {
-    const { shouldLoadSkillEntries, skillEntries } = resolveEmbeddedRunSkillEntries({
-      workspaceDir: effectiveWorkspace,
-      config: params.config,
-      skillsSnapshot: params.skillsSnapshot,
-    });
+    const shouldLoadSkillEntries = !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
+    const skillEntries = shouldLoadSkillEntries
+      ? loadWorkspaceSkillEntries(effectiveWorkspace)
+      : [];
     restoreSkillEnv = params.skillsSnapshot
       ? applySkillEnvOverridesFromSnapshot({
           snapshot: params.skillsSnapshot,
@@ -370,9 +370,7 @@ export async function compactEmbeddedPiSessionDirect(
       sandbox,
       messageProvider: params.messageChannel ?? params.messageProvider,
       agentAccountId: params.agentAccountId,
-      sessionKey: sandboxSessionKey,
-      sessionId: params.sessionId,
-      runId: params.runId,
+      sessionKey: params.sessionKey ?? params.sessionId,
       groupId: params.groupId,
       groupChannel: params.groupChannel,
       groupSpace: params.groupSpace,
@@ -501,7 +499,6 @@ export async function compactEmbeddedPiSessionDirect(
       docsPath: docsPath ?? undefined,
       ttsHint,
       promptMode,
-      acpEnabled: params.config?.acp?.enabled !== false,
       runtimeInfo,
       reactionGuidance,
       messageToolHints,
@@ -540,9 +537,9 @@ export async function compactEmbeddedPiSessionDirect(
         allowedToolNames,
       });
       trackSessionManagerAccess(params.sessionFile);
-      const settingsManager = createPreparedEmbeddedPiSettingsManager({
-        cwd: effectiveWorkspace,
-        agentDir,
+      const settingsManager = SettingsManager.create(effectiveWorkspace, agentDir);
+      applyPiCompactionSettingsFromConfig({
+        settingsManager,
         cfg: params.config,
       });
       // Sets compaction/pruning runtime state and returns extension factories

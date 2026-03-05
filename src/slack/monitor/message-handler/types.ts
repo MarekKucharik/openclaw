@@ -13,7 +13,6 @@ export type PreparedSlackMessage = {
   channelConfig: SlackChannelConfigResolved | null;
   replyTarget: string;
   ctxPayload: FinalizedMsgContext;
-  replyToMode: "off" | "first" | "all";
   isDirectMessage: boolean;
   isRoomish: boolean;
   historyKey: string;

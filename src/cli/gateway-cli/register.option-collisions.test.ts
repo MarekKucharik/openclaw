@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { runRegisteredCli } from "../../test-utils/command-runner.js";
 import { createCliRuntimeCapture } from "../test-runtime-capture.js";
 
 const callGatewayCli = vi.fn(async (_method: string, _opts: unknown, _params?: unknown) => ({
@@ -112,13 +113,9 @@ vi.mock("./discover.js", () => ({
 
 describe("gateway register option collisions", () => {
   let registerGatewayCli: typeof import("./register.js").registerGatewayCli;
-  let sharedProgram: Command;
 
   beforeAll(async () => {
     ({ registerGatewayCli } = await import("./register.js"));
-    sharedProgram = new Command();
-    sharedProgram.exitOverride();
-    registerGatewayCli(sharedProgram);
   });
 
   beforeEach(() => {
@@ -128,8 +125,9 @@ describe("gateway register option collisions", () => {
   });
 
   it("forwards --token to gateway call when parent and child option names collide", async () => {
-    await sharedProgram.parseAsync(["gateway", "call", "health", "--token", "tok_call", "--json"], {
-      from: "user",
+    await runRegisteredCli({
+      register: registerGatewayCli as (program: Command) => void,
+      argv: ["gateway", "call", "health", "--token", "tok_call", "--json"],
     });
 
     expect(callGatewayCli).toHaveBeenCalledWith(
@@ -142,8 +140,9 @@ describe("gateway register option collisions", () => {
   });
 
   it("forwards --token to gateway probe when parent and child option names collide", async () => {
-    await sharedProgram.parseAsync(["gateway", "probe", "--token", "tok_probe", "--json"], {
-      from: "user",
+    await runRegisteredCli({
+      register: registerGatewayCli as (program: Command) => void,
+      argv: ["gateway", "probe", "--token", "tok_probe", "--json"],
     });
 
     expect(gatewayStatusCommand).toHaveBeenCalledWith(

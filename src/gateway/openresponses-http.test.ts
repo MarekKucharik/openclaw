@@ -90,67 +90,6 @@ async function ensureResponseConsumed(res: Response) {
   }
 }
 
-const WEATHER_TOOL = [
-  {
-    type: "function",
-    function: { name: "get_weather", description: "Get weather" },
-  },
-] as const;
-
-function buildUrlInputMessage(params: {
-  kind: "input_file" | "input_image";
-  url: string;
-  text?: string;
-}) {
-  return [
-    {
-      type: "message",
-      role: "user",
-      content: [
-        { type: "input_text", text: params.text ?? "read this" },
-        {
-          type: params.kind,
-          source: { type: "url", url: params.url },
-        },
-      ],
-    },
-  ];
-}
-
-function buildResponsesUrlPolicyConfig(maxUrlParts: number) {
-  return {
-    gateway: {
-      http: {
-        endpoints: {
-          responses: {
-            enabled: true,
-            maxUrlParts,
-            files: {
-              allowUrl: true,
-              urlAllowlist: ["cdn.example.com", "*.assets.example.com"],
-            },
-            images: {
-              allowUrl: true,
-              urlAllowlist: ["images.example.com"],
-            },
-          },
-        },
-      },
-    },
-  };
-}
-
-async function expectInvalidRequest(
-  res: Response,
-  messagePattern: RegExp,
-): Promise<{ type?: string; message?: string } | undefined> {
-  expect(res.status).toBe(400);
-  const json = (await res.json()) as { error?: { type?: string; message?: string } };
-  expect(json.error?.type).toBe("invalid_request_error");
-  expect(json.error?.message ?? "").toMatch(messagePattern);
-  return json.error;
-}
-
 describe("OpenResponses HTTP API (e2e)", () => {
   it("rejects when disabled (default + config)", { timeout: 15_000 }, async () => {
     const port = await getFreePort();
@@ -224,9 +163,6 @@ describe("OpenResponses HTTP API (e2e)", () => {
       expect((optsHeader as { sessionKey?: string } | undefined)?.sessionKey ?? "").toMatch(
         /^agent:beta:/,
       );
-      expect((optsHeader as { messageChannel?: string } | undefined)?.messageChannel).toBe(
-        "webchat",
-      );
       await ensureResponseConsumed(resHeader);
 
       mockAgentOnce([{ text: "hello" }]);
@@ -237,19 +173,6 @@ describe("OpenResponses HTTP API (e2e)", () => {
         /^agent:beta:/,
       );
       await ensureResponseConsumed(resModel);
-
-      mockAgentOnce([{ text: "hello" }]);
-      const resChannelHeader = await postResponses(
-        port,
-        { model: "openclaw", input: "hi" },
-        { "x-openclaw-message-channel": "custom-client-channel" },
-      );
-      expect(resChannelHeader.status).toBe(200);
-      const optsChannelHeader = (agentCommand.mock.calls[0] as unknown[] | undefined)?.[0];
-      expect((optsChannelHeader as { messageChannel?: string } | undefined)?.messageChannel).toBe(
-        "webchat",
-      );
-      await ensureResponseConsumed(resChannelHeader);
 
       mockAgentOnce([{ text: "hello" }]);
       const resUser = await postResponses(port, {
@@ -385,7 +308,12 @@ describe("OpenResponses HTTP API (e2e)", () => {
       const resToolNone = await postResponses(port, {
         model: "openclaw",
         input: "hi",
-        tools: WEATHER_TOOL,
+        tools: [
+          {
+            type: "function",
+            function: { name: "get_weather", description: "Get weather" },
+          },
+        ],
         tool_choice: "none",
       });
       expect(resToolNone.status).toBe(200);
@@ -423,7 +351,12 @@ describe("OpenResponses HTTP API (e2e)", () => {
       const resUnknownTool = await postResponses(port, {
         model: "openclaw",
         input: "hi",
-        tools: WEATHER_TOOL,
+        tools: [
+          {
+            type: "function",
+            function: { name: "get_weather", description: "Get weather" },
+          },
+        ],
         tool_choice: { type: "function", function: { name: "unknown_tool" } },
       });
       expect(resUnknownTool.status).toBe(400);
@@ -587,35 +520,100 @@ describe("OpenResponses HTTP API (e2e)", () => {
 
     const blockedPrivate = await postResponses(port, {
       model: "openclaw",
-      input: buildUrlInputMessage({
-        kind: "input_file",
-        url: "http://127.0.0.1:6379/info",
-      }),
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "read this" },
+            {
+              type: "input_file",
+              source: { type: "url", url: "http://127.0.0.1:6379/info" },
+            },
+          ],
+        },
+      ],
     });
-    await expectInvalidRequest(blockedPrivate, /invalid request|private|internal|blocked/i);
+    expect(blockedPrivate.status).toBe(400);
+    const blockedPrivateJson = (await blockedPrivate.json()) as {
+      error?: { type?: string; message?: string };
+    };
+    expect(blockedPrivateJson.error?.type).toBe("invalid_request_error");
+    expect(blockedPrivateJson.error?.message ?? "").toMatch(
+      /invalid request|private|internal|blocked/i,
+    );
 
     const blockedMetadata = await postResponses(port, {
       model: "openclaw",
-      input: buildUrlInputMessage({
-        kind: "input_image",
-        url: "http://metadata.google.internal/computeMetadata/v1",
-      }),
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "read this" },
+            {
+              type: "input_image",
+              source: { type: "url", url: "http://metadata.google.internal/computeMetadata/v1" },
+            },
+          ],
+        },
+      ],
     });
-    await expectInvalidRequest(blockedMetadata, /invalid request|blocked|metadata|internal/i);
+    expect(blockedMetadata.status).toBe(400);
+    const blockedMetadataJson = (await blockedMetadata.json()) as {
+      error?: { type?: string; message?: string };
+    };
+    expect(blockedMetadataJson.error?.type).toBe("invalid_request_error");
+    expect(blockedMetadataJson.error?.message ?? "").toMatch(
+      /invalid request|blocked|metadata|internal/i,
+    );
 
     const blockedScheme = await postResponses(port, {
       model: "openclaw",
-      input: buildUrlInputMessage({
-        kind: "input_file",
-        url: "file:///etc/passwd",
-      }),
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "read this" },
+            {
+              type: "input_file",
+              source: { type: "url", url: "file:///etc/passwd" },
+            },
+          ],
+        },
+      ],
     });
-    await expectInvalidRequest(blockedScheme, /invalid request|http or https/i);
+    expect(blockedScheme.status).toBe(400);
+    const blockedSchemeJson = (await blockedScheme.json()) as {
+      error?: { type?: string; message?: string };
+    };
+    expect(blockedSchemeJson.error?.type).toBe("invalid_request_error");
+    expect(blockedSchemeJson.error?.message ?? "").toMatch(/invalid request|http or https/i);
     expect(agentCommand).not.toHaveBeenCalled();
   });
 
   it("enforces URL allowlist and URL part cap for responses inputs", async () => {
-    const allowlistConfig = buildResponsesUrlPolicyConfig(1);
+    const allowlistConfig = {
+      gateway: {
+        http: {
+          endpoints: {
+            responses: {
+              enabled: true,
+              maxUrlParts: 1,
+              files: {
+                allowUrl: true,
+                urlAllowlist: ["cdn.example.com", "*.assets.example.com"],
+              },
+              images: {
+                allowUrl: true,
+                urlAllowlist: ["images.example.com"],
+              },
+            },
+          },
+        },
+      },
+    };
     await writeGatewayConfig(allowlistConfig);
 
     const allowlistPort = await getFreePort();
@@ -625,18 +623,52 @@ describe("OpenResponses HTTP API (e2e)", () => {
 
       const allowlistBlocked = await postResponses(allowlistPort, {
         model: "openclaw",
-        input: buildUrlInputMessage({
-          kind: "input_file",
-          text: "fetch this",
-          url: "https://evil.example.org/secret.txt",
-        }),
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "fetch this" },
+              {
+                type: "input_file",
+                source: { type: "url", url: "https://evil.example.org/secret.txt" },
+              },
+            ],
+          },
+        ],
       });
-      await expectInvalidRequest(allowlistBlocked, /invalid request|allowlist|blocked/i);
+      expect(allowlistBlocked.status).toBe(400);
+      const allowlistBlockedJson = (await allowlistBlocked.json()) as {
+        error?: { type?: string; message?: string };
+      };
+      expect(allowlistBlockedJson.error?.type).toBe("invalid_request_error");
+      expect(allowlistBlockedJson.error?.message ?? "").toMatch(
+        /invalid request|allowlist|blocked/i,
+      );
     } finally {
       await allowlistServer.close({ reason: "responses allowlist hardening test done" });
     }
 
-    const capConfig = buildResponsesUrlPolicyConfig(0);
+    const capConfig = {
+      gateway: {
+        http: {
+          endpoints: {
+            responses: {
+              enabled: true,
+              maxUrlParts: 0,
+              files: {
+                allowUrl: true,
+                urlAllowlist: ["cdn.example.com", "*.assets.example.com"],
+              },
+              images: {
+                allowUrl: true,
+                urlAllowlist: ["images.example.com"],
+              },
+            },
+          },
+        },
+      },
+    };
     await writeGatewayConfig(capConfig);
 
     const capPort = await getFreePort();
@@ -645,14 +677,26 @@ describe("OpenResponses HTTP API (e2e)", () => {
       agentCommand.mockClear();
       const maxUrlBlocked = await postResponses(capPort, {
         model: "openclaw",
-        input: buildUrlInputMessage({
-          kind: "input_file",
-          text: "fetch this",
-          url: "https://cdn.example.com/file-1.txt",
-        }),
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "fetch this" },
+              {
+                type: "input_file",
+                source: { type: "url", url: "https://cdn.example.com/file-1.txt" },
+              },
+            ],
+          },
+        ],
       });
-      await expectInvalidRequest(
-        maxUrlBlocked,
+      expect(maxUrlBlocked.status).toBe(400);
+      const maxUrlBlockedJson = (await maxUrlBlocked.json()) as {
+        error?: { type?: string; message?: string };
+      };
+      expect(maxUrlBlockedJson.error?.type).toBe("invalid_request_error");
+      expect(maxUrlBlockedJson.error?.message ?? "").toMatch(
         /invalid request|Too many URL-based input sources/i,
       );
       expect(agentCommand).not.toHaveBeenCalled();

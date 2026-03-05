@@ -15,10 +15,10 @@ import {
   createSessionVisibilityGuard,
   createAgentToAgentPolicy,
   extractAssistantText,
+  isResolvedSessionVisibleToRequester,
   resolveEffectiveSessionToolsVisibility,
   resolveSessionReference,
   resolveSandboxedSessionToolContext,
-  resolveVisibleSessionReference,
   stripToolMessages,
 } from "./sessions-helpers.js";
 import { buildAgentToAgentMessageContext, resolvePingPongTurns } from "./sessions-send-helpers.js";
@@ -171,23 +171,25 @@ export function createSessionsSendTool(opts?: {
           error: resolvedSession.error,
         });
       }
-      const visibleSession = await resolveVisibleSessionReference({
-        resolvedSession,
+      // Normalize sessionKey/sessionId input into a canonical session key.
+      const resolvedKey = resolvedSession.key;
+      const displayKey = resolvedSession.displayKey;
+      const resolvedViaSessionId = resolvedSession.resolvedViaSessionId;
+
+      const visible = await isResolvedSessionVisibleToRequester({
         requesterSessionKey: effectiveRequesterKey,
+        targetSessionKey: resolvedKey,
         restrictToSpawned,
-        visibilitySessionKey: sessionKey,
+        resolvedViaSessionId,
       });
-      if (!visibleSession.ok) {
+      if (!visible) {
         return jsonResult({
           runId: crypto.randomUUID(),
-          status: visibleSession.status,
-          error: visibleSession.error,
-          sessionKey: visibleSession.displayKey,
+          status: "forbidden",
+          error: `Session not visible from this sandboxed agent session: ${sessionKey}`,
+          sessionKey: displayKey,
         });
       }
-      // Normalize sessionKey/sessionId input into a canonical session key.
-      const resolvedKey = visibleSession.key;
-      const displayKey = visibleSession.displayKey;
       const timeoutSeconds =
         typeof params.timeoutSeconds === "number" && Number.isFinite(params.timeoutSeconds)
           ? Math.max(0, Math.floor(params.timeoutSeconds))

@@ -120,9 +120,6 @@ export type ChannelAccountSnapshot = {
   lastStopAt?: number | null;
   lastInboundAt?: number | null;
   lastOutboundAt?: number | null;
-  busy?: boolean;
-  activeRuns?: number;
-  lastRunActivityAt?: number | null;
   mode?: string;
   dmPolicy?: string;
   allowFrom?: string[];
@@ -253,6 +250,8 @@ export type ChannelThreadingContext = {
   To?: string;
   ChatType?: string;
   CurrentMessageId?: string | number;
+  /** JID or E164 of the sender of the current inbound message. */
+  SenderId?: string;
   ReplyToId?: string;
   ReplyToIdFull?: string;
   ThreadLabel?: string;
@@ -264,6 +263,10 @@ export type ChannelThreadingToolContext = {
   currentChannelProvider?: ChannelId;
   currentThreadTs?: string;
   currentMessageId?: string | number;
+  /** JID of the sender of the current inbound message (for reaction participant resolution). */
+  currentMessageSenderId?: string;
+  /** Whether the current inbound message was sent by the bot itself. */
+  currentMessageFromMe?: boolean;
   replyToMode?: "off" | "first" | "all";
   hasRepliedRef?: { value: boolean };
   /**
@@ -332,7 +335,6 @@ export type ChannelMessageActionContext = {
 export type ChannelToolSend = {
   to: string;
   accountId?: string | null;
-  threadId?: string | null;
 };
 
 export type ChannelMessageActionAdapter = {

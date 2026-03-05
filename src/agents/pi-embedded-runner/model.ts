@@ -1,5 +1,4 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
-import type { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { ModelDefinitionConfig } from "../../config/types.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
@@ -8,18 +7,21 @@ import { buildModelAliasLines } from "../model-alias-lines.js";
 import { normalizeModelCompat } from "../model-compat.js";
 import { resolveForwardCompatModel } from "../model-forward-compat.js";
 import { normalizeProviderId } from "../model-selection.js";
-import { discoverAuthStorage, discoverModels } from "../pi-model-discovery.js";
+import {
+  discoverAuthStorage,
+  discoverModels,
+  type AuthStorage,
+  type ModelRegistry,
+} from "../pi-model-discovery.js";
 
 type InlineModelEntry = ModelDefinitionConfig & {
   provider: string;
   baseUrl?: string;
-  headers?: Record<string, string>;
 };
 type InlineProviderConfig = {
   baseUrl?: string;
   api?: ModelDefinitionConfig["api"];
   models?: ModelDefinitionConfig[];
-  headers?: Record<string, string>;
 };
 
 export { buildModelAliasLines };
@@ -37,10 +39,6 @@ export function buildInlineProviderModels(
       provider: trimmed,
       baseUrl: entry?.baseUrl,
       api: model.api ?? entry?.api,
-      headers:
-        entry?.headers || (model as InlineModelEntry).headers
-          ? { ...entry?.headers, ...(model as InlineModelEntry).headers }
-          : undefined,
     }));
   });
 }
@@ -102,28 +100,17 @@ export function resolveModel(
     }
     const providerCfg = providers[provider];
     if (providerCfg || modelId.startsWith("mock-")) {
-      const configuredModel = providerCfg?.models?.find((candidate) => candidate.id === modelId);
       const fallbackModel: Model<Api> = normalizeModelCompat({
         id: modelId,
         name: modelId,
         api: providerCfg?.api ?? "openai-responses",
         provider,
         baseUrl: providerCfg?.baseUrl,
-        reasoning: configuredModel?.reasoning ?? false,
+        reasoning: false,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow:
-          configuredModel?.contextWindow ??
-          providerCfg?.models?.[0]?.contextWindow ??
-          DEFAULT_CONTEXT_TOKENS,
-        maxTokens:
-          configuredModel?.maxTokens ??
-          providerCfg?.models?.[0]?.maxTokens ??
-          DEFAULT_CONTEXT_TOKENS,
-        headers:
-          providerCfg?.headers || configuredModel?.headers
-            ? { ...providerCfg?.headers, ...configuredModel?.headers }
-            : undefined,
+        contextWindow: providerCfg?.models?.[0]?.contextWindow ?? DEFAULT_CONTEXT_TOKENS,
+        maxTokens: providerCfg?.models?.[0]?.maxTokens ?? DEFAULT_CONTEXT_TOKENS,
       } as Model<Api>);
       return { model: fallbackModel, authStorage, modelRegistry };
     }
@@ -132,20 +119,6 @@ export function resolveModel(
       authStorage,
       modelRegistry,
     };
-  }
-  const providerOverride = cfg?.models?.providers?.[provider] as InlineProviderConfig | undefined;
-  if (providerOverride?.baseUrl || providerOverride?.headers) {
-    const overridden: Model<Api> & { headers?: Record<string, string> } = { ...model };
-    if (providerOverride.baseUrl) {
-      overridden.baseUrl = providerOverride.baseUrl;
-    }
-    if (providerOverride.headers) {
-      overridden.headers = {
-        ...(model as Model<Api> & { headers?: Record<string, string> }).headers,
-        ...providerOverride.headers,
-      };
-    }
-    return { model: normalizeModelCompat(overridden), authStorage, modelRegistry };
   }
   return { model: normalizeModelCompat(model), authStorage, modelRegistry };
 }

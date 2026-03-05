@@ -17,6 +17,8 @@ describe("web search provider config", () => {
         provider: "perplexity",
         providerConfig: {
           apiKey: "test-key",
+          baseUrl: "https://api.perplexity.ai",
+          model: "perplexity/sonar-pro",
         },
       }),
     );

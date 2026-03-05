@@ -69,27 +69,37 @@ const replyLogger = {
   warn: vi.fn(),
 };
 
-async function expectReplySuppressed(replyResult: { text: string; isReasoning?: boolean }) {
-  const msg = makeMsg();
-  await deliverWebReply({
-    replyResult,
-    msg,
-    maxMediaBytes: 1024 * 1024,
-    textLimit: 200,
-    replyLogger,
-    skipLog: true,
-  });
-  expect(msg.reply).not.toHaveBeenCalled();
-  expect(msg.sendMedia).not.toHaveBeenCalled();
-}
-
 describe("deliverWebReply", () => {
   it("suppresses payloads flagged as reasoning", async () => {
-    await expectReplySuppressed({ text: "Reasoning:\n_hidden_", isReasoning: true });
+    const msg = makeMsg();
+
+    await deliverWebReply({
+      replyResult: { text: "Reasoning:\n_hidden_", isReasoning: true },
+      msg,
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(msg.reply).not.toHaveBeenCalled();
+    expect(msg.sendMedia).not.toHaveBeenCalled();
   });
 
   it("suppresses payloads that start with reasoning prefix text", async () => {
-    await expectReplySuppressed({ text: "   \n Reasoning:\n_hidden_" });
+    const msg = makeMsg();
+
+    await deliverWebReply({
+      replyResult: { text: "   \n Reasoning:\n_hidden_" },
+      msg,
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(msg.reply).not.toHaveBeenCalled();
+    expect(msg.sendMedia).not.toHaveBeenCalled();
   });
 
   it("does not suppress messages that mention Reasoning: mid-text", async () => {

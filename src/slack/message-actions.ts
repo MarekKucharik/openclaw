@@ -32,7 +32,6 @@ export function listSlackMessageActions(cfg: OpenClawConfig): ChannelMessageActi
     actions.add("read");
     actions.add("edit");
     actions.add("delete");
-    actions.add("download-file");
   }
   if (isActionEnabled("pins")) {
     actions.add("pin");

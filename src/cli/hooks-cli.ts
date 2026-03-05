@@ -26,7 +26,6 @@ import { renderTable } from "../terminal/table.js";
 import { theme } from "../terminal/theme.js";
 import { resolveUserPath, shortenHomePath } from "../utils.js";
 import { formatCliCommand } from "./command-format.js";
-import { looksLikeLocalInstallSpec } from "./install-spec.js";
 import {
   buildNpmInstallRecordFields,
   resolvePinnedNpmInstallRecordForCli,
@@ -661,7 +660,15 @@ export function registerHooksCli(program: Command): void {
         process.exit(1);
       }
 
-      if (looksLikeLocalInstallSpec(raw, [".zip", ".tgz", ".tar.gz", ".tar"])) {
+      const looksLikePath =
+        raw.startsWith(".") ||
+        raw.startsWith("~") ||
+        path.isAbsolute(raw) ||
+        raw.endsWith(".zip") ||
+        raw.endsWith(".tgz") ||
+        raw.endsWith(".tar.gz") ||
+        raw.endsWith(".tar");
+      if (looksLikePath) {
         defaultRuntime.error(`Path not found: ${resolved}`);
         process.exit(1);
       }

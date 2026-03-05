@@ -8,8 +8,7 @@ import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
 import { assertSupportedRuntime } from "../infra/runtime-guard.js";
 import { installUnhandledRejectionHandler } from "../infra/unhandled-rejections.js";
 import { enableConsoleCapture } from "../logging.js";
-import { getCommandPathWithRootOptions, getPrimaryCommand, hasHelpOrVersion } from "./argv.js";
-import { applyCliProfileEnv, parseCliProfileArgs } from "./profile.js";
+import { getCommandPath, getPrimaryCommand, hasHelpOrVersion } from "./argv.js";
 import { tryRouteCli } from "./route.js";
 import { normalizeWindowsArgv } from "./windows-argv.js";
 
@@ -46,7 +45,7 @@ export function shouldEnsureCliPath(argv: string[]): boolean {
   if (hasHelpOrVersion(argv)) {
     return false;
   }
-  const [primary, secondary] = getCommandPathWithRootOptions(argv, 2);
+  const [primary, secondary] = getCommandPath(argv, 2);
   if (!primary) {
     return true;
   }
@@ -63,16 +62,7 @@ export function shouldEnsureCliPath(argv: string[]): boolean {
 }
 
 export async function runCli(argv: string[] = process.argv) {
-  let normalizedArgv = normalizeWindowsArgv(argv);
-  const parsedProfile = parseCliProfileArgs(normalizedArgv);
-  if (!parsedProfile.ok) {
-    throw new Error(parsedProfile.error);
-  }
-  if (parsedProfile.profile) {
-    applyCliProfileEnv({ profile: parsedProfile.profile });
-  }
-  normalizedArgv = parsedProfile.argv;
-
+  const normalizedArgv = normalizeWindowsArgv(argv);
   loadDotEnv({ quiet: true });
   normalizeEnv();
   if (shouldEnsureCliPath(normalizedArgv)) {

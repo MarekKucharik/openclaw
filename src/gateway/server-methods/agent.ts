@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { listAgentIds } from "../../agents/agent-scope.js";
-import type { AgentInternalEvent } from "../../agents/internal-events.js";
-import { buildBareSessionResetPrompt } from "../../auto-reply/reply/session-reset-prompt.js";
-import { agentCommandFromIngress } from "../../commands/agent.js";
+import { BARE_SESSION_RESET_PROMPT } from "../../auto-reply/reply/session-reset-prompt.js";
+import { agentCommand } from "../../commands/agent.js";
 import { loadConfig } from "../../config/config.js";
 import {
-  mergeSessionEntry,
   resolveAgentIdFromSessionKey,
   resolveExplicitAgentSessionKey,
   resolveAgentMainSessionKey,
@@ -32,7 +30,6 @@ import {
 import { resolveAssistantIdentity } from "../assistant-identity.js";
 import { parseMessageWithAttachments } from "../chat-attachments.js";
 import { resolveAssistantAvatarUrl } from "../control-ui-shared.js";
-import { ADMIN_SCOPE } from "../method-scopes.js";
 import { GATEWAY_CLIENT_CAPS, hasGatewayClientCap } from "../protocol/client-info.js";
 import {
   ErrorCodes,
@@ -51,22 +48,11 @@ import {
 import { formatForLog } from "../ws-log.js";
 import { waitForAgentJob } from "./agent-job.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
-import {
-  readTerminalSnapshotFromGatewayDedupe,
-  setGatewayDedupeEntry,
-  type AgentWaitTerminalSnapshot,
-  waitForTerminalGatewayDedupe,
-} from "./agent-wait-dedupe.js";
 import { normalizeRpcAttachmentsToChatAttachments } from "./attachment-normalize.js";
 import { sessionsHandlers } from "./sessions.js";
 import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 
 const RESET_COMMAND_RE = /^\/(new|reset)(?:\s+([\s\S]*))?$/i;
-
-function resolveSenderIsOwnerFromClient(client: GatewayRequestHandlerOptions["client"]): boolean {
-  const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
-  return scopes.includes(ADMIN_SCOPE);
-}
 
 function isGatewayErrorShape(value: unknown): value is { code: string; message: string } {
   if (!value || typeof value !== "object") {
@@ -204,7 +190,6 @@ export const agentHandlers: GatewayRequestHandlers = {
       groupSpace?: string;
       lane?: string;
       extraSystemPrompt?: string;
-      internalEvents?: AgentInternalEvent[];
       idempotencyKey: string;
       timeout?: number;
       bestEffortDeliver?: boolean;
@@ -212,7 +197,6 @@ export const agentHandlers: GatewayRequestHandlers = {
       spawnedBy?: string;
       inputProvenance?: InputProvenance;
     };
-    const senderIsOwner = resolveSenderIsOwnerFromClient(client);
     const cfg = loadConfig();
     const idem = request.idempotencyKey;
     const groupIdRaw = typeof request.groupId === "string" ? request.groupId.trim() : "";
@@ -357,9 +341,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       } else {
         // Keep bare /new and /reset behavior aligned with chat.send:
         // reset first, then run a fresh-session greeting prompt in-place.
-        // Date is embedded in the prompt so agents read the correct daily
-        // memory files; skip further timestamp injection to avoid duplication.
-        message = buildBareSessionResetPrompt(cfg);
+        message = BARE_SESSION_RESET_PROMPT;
         skipTimestampInjection = true;
       }
     }
@@ -403,7 +385,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       resolvedGroupChannel = resolvedGroupChannel || inheritedGroup?.groupChannel;
       resolvedGroupSpace = resolvedGroupSpace || inheritedGroup?.groupSpace;
       const deliveryFields = normalizeSessionDeliveryFields(entry);
-      const nextEntryPatch: SessionEntry = {
+      const nextEntry: SessionEntry = {
         sessionId,
         updatedAt: now,
         thinkingLevel: entry?.thinkingLevel,
@@ -428,7 +410,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         cliSessionIds: entry?.cliSessionIds,
         claudeCliSessionId: entry?.claudeCliSessionId,
       };
-      sessionEntry = mergeSessionEntry(entry, nextEntryPatch);
+      sessionEntry = nextEntry;
       const sendPolicy = resolveSendPolicy({
         cfg,
         entry,
@@ -450,7 +432,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       const agentId = resolveAgentIdFromSessionKey(canonicalSessionKey);
       const mainSessionKey = resolveAgentMainSessionKey({ cfg, agentId });
       if (storePath) {
-        const persisted = await updateSessionStore(storePath, (store) => {
+        await updateSessionStore(storePath, (store) => {
           const target = resolveGatewaySessionStoreTarget({
             cfg,
             key: requestedSessionKey,
@@ -461,11 +443,8 @@ export const agentHandlers: GatewayRequestHandlers = {
             canonicalKey: target.canonicalKey,
             candidates: target.storeKeys,
           });
-          const merged = mergeSessionEntry(store[canonicalSessionKey], nextEntryPatch);
-          store[canonicalSessionKey] = merged;
-          return merged;
+          store[canonicalSessionKey] = nextEntry;
         });
-        sessionEntry = persisted;
       }
       if (canonicalSessionKey === mainSessionKey || canonicalSessionKey === "global") {
         context.addChatRun(idem, {
@@ -580,17 +559,6 @@ export const agentHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const normalizedTurnSource = normalizeMessageChannel(turnSourceChannel);
-    const turnSourceMessageChannel =
-      normalizedTurnSource && isGatewayMessageChannel(normalizedTurnSource)
-        ? normalizedTurnSource
-        : undefined;
-    const originMessageChannel =
-      turnSourceMessageChannel ??
-      (client?.connect && isWebchatConnect(client.connect)
-        ? INTERNAL_MESSAGE_CHANNEL
-        : resolvedChannel);
-
     const deliver = request.deliver === true && resolvedChannel !== INTERNAL_MESSAGE_CHANNEL;
 
     const accepted = {
@@ -599,20 +567,16 @@ export const agentHandlers: GatewayRequestHandlers = {
       acceptedAt: Date.now(),
     };
     // Store an in-flight ack so retries do not spawn a second run.
-    setGatewayDedupeEntry({
-      dedupe: context.dedupe,
-      key: `agent:${idem}`,
-      entry: {
-        ts: Date.now(),
-        ok: true,
-        payload: accepted,
-      },
+    context.dedupe.set(`agent:${idem}`, {
+      ts: Date.now(),
+      ok: true,
+      payload: accepted,
     });
     respond(true, accepted, undefined, { runId });
 
     const resolvedThreadId = explicitThreadId ?? deliveryPlan.resolvedThreadId;
 
-    void agentCommandFromIngress(
+    void agentCommand(
       {
         message,
         images,
@@ -626,7 +590,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         accountId: resolvedAccountId,
         threadId: resolvedThreadId,
         runContext: {
-          messageChannel: originMessageChannel,
+          messageChannel: resolvedChannel,
           accountId: resolvedAccountId,
           groupId: resolvedGroupId,
           groupChannel: resolvedGroupChannel,
@@ -639,13 +603,11 @@ export const agentHandlers: GatewayRequestHandlers = {
         spawnedBy: spawnedByValue,
         timeout: request.timeout?.toString(),
         bestEffortDeliver,
-        messageChannel: originMessageChannel,
+        messageChannel: resolvedChannel,
         runId,
         lane: request.lane,
         extraSystemPrompt: request.extraSystemPrompt,
-        internalEvents: request.internalEvents,
         inputProvenance,
-        senderIsOwner,
       },
       defaultRuntime,
       context.deps,
@@ -657,14 +619,10 @@ export const agentHandlers: GatewayRequestHandlers = {
           summary: "completed",
           result,
         };
-        setGatewayDedupeEntry({
-          dedupe: context.dedupe,
-          key: `agent:${idem}`,
-          entry: {
-            ts: Date.now(),
-            ok: true,
-            payload,
-          },
+        context.dedupe.set(`agent:${idem}`, {
+          ts: Date.now(),
+          ok: true,
+          payload,
         });
         // Send a second res frame (same id) so TS clients with expectFinal can wait.
         // Swift clients will typically treat the first res as the result and ignore this.
@@ -677,15 +635,11 @@ export const agentHandlers: GatewayRequestHandlers = {
           status: "error" as const,
           summary: String(err),
         };
-        setGatewayDedupeEntry({
-          dedupe: context.dedupe,
-          key: `agent:${idem}`,
-          entry: {
-            ts: Date.now(),
-            ok: false,
-            payload,
-            error,
-          },
+        context.dedupe.set(`agent:${idem}`, {
+          ts: Date.now(),
+          ok: false,
+          payload,
+          error,
         });
         respond(false, payload, error, {
           runId,
@@ -747,7 +701,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       }) ?? identity.avatar;
     respond(true, { ...identity, avatar: avatarValue }, undefined);
   },
-  "agent.wait": async ({ params, respond, context }) => {
+  "agent.wait": async ({ params, respond }) => {
     if (!validateAgentWaitParams(params)) {
       respond(
         false,
@@ -765,61 +719,11 @@ export const agentHandlers: GatewayRequestHandlers = {
       typeof p.timeoutMs === "number" && Number.isFinite(p.timeoutMs)
         ? Math.max(0, Math.floor(p.timeoutMs))
         : 30_000;
-    const hasActiveChatRun = context.chatAbortControllers.has(runId);
 
-    const cachedGatewaySnapshot = readTerminalSnapshotFromGatewayDedupe({
-      dedupe: context.dedupe,
-      runId,
-      ignoreAgentTerminalSnapshot: hasActiveChatRun,
-    });
-    if (cachedGatewaySnapshot) {
-      respond(true, {
-        runId,
-        status: cachedGatewaySnapshot.status,
-        startedAt: cachedGatewaySnapshot.startedAt,
-        endedAt: cachedGatewaySnapshot.endedAt,
-        error: cachedGatewaySnapshot.error,
-      });
-      return;
-    }
-
-    const lifecycleAbortController = new AbortController();
-    const dedupeAbortController = new AbortController();
-    const lifecyclePromise = waitForAgentJob({
+    const snapshot = await waitForAgentJob({
       runId,
       timeoutMs,
-      signal: lifecycleAbortController.signal,
-      // When chat.send is active with the same runId, ignore cached lifecycle
-      // snapshots so stale agent results do not preempt the active chat run.
-      ignoreCachedSnapshot: hasActiveChatRun,
     });
-    const dedupePromise = waitForTerminalGatewayDedupe({
-      dedupe: context.dedupe,
-      runId,
-      timeoutMs,
-      signal: dedupeAbortController.signal,
-      ignoreAgentTerminalSnapshot: hasActiveChatRun,
-    });
-
-    const first = await Promise.race([
-      lifecyclePromise.then((snapshot) => ({ source: "lifecycle" as const, snapshot })),
-      dedupePromise.then((snapshot) => ({ source: "dedupe" as const, snapshot })),
-    ]);
-
-    let snapshot: AgentWaitTerminalSnapshot | Awaited<ReturnType<typeof waitForAgentJob>> =
-      first.snapshot;
-    if (snapshot) {
-      if (first.source === "lifecycle") {
-        dedupeAbortController.abort();
-      } else {
-        lifecycleAbortController.abort();
-      }
-    } else {
-      snapshot = first.source === "lifecycle" ? await dedupePromise : await lifecyclePromise;
-      lifecycleAbortController.abort();
-      dedupeAbortController.abort();
-    }
-
     if (!snapshot) {
       respond(true, {
         runId,

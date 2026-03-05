@@ -90,7 +90,13 @@ async function safeSaveCreds(
 export async function createWaSocket(
   printQr: boolean,
   verbose: boolean,
-  opts: { authDir?: string; onQr?: (qr: string) => void } = {},
+  opts: {
+    authDir?: string;
+    onQr?: (qr: string) => void;
+    getMessage?: (
+      key: import("@whiskeysockets/baileys").WAMessageKey,
+    ) => Promise<import("@whiskeysockets/baileys").proto.IMessage | undefined>;
+  } = {},
 ): Promise<ReturnType<typeof makeWASocket>> {
   const baseLogger = getChildLogger(
     { module: "baileys" },
@@ -116,6 +122,7 @@ export async function createWaSocket(
     browser: ["openclaw", "cli", VERSION],
     syncFullHistory: false,
     markOnlineOnConnect: false,
+    getMessage: opts.getMessage,
   });
 
   sock.ev.on("creds.update", () => enqueueSaveCreds(authDir, saveCreds, sessionLogger));

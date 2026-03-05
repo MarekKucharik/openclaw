@@ -1,8 +1,6 @@
-import type { SecretInput } from "./types.secrets.js";
-
 export type SkillConfig = {
   enabled?: boolean;
-  apiKey?: SecretInput;
+  apiKey?: string;
   env?: Record<string, string>;
   config?: Record<string, unknown>;
 };
